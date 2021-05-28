@@ -20,23 +20,20 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+// This file is meant to be modified as specs change.
+// Important: Run "make" to regenerate code after modifying this file
 
 // DopplerSecretSpec defines the desired state of DopplerSecret
 type DopplerSecretSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// A Doppler service token, used to interact with the Doppler API
+	ServiceToken string `json:"serviceToken,omitempty"`
 
-	// Foo is an example field of DopplerSecret. Edit dopplersecret_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// The name of the Kubernetes secret where the operator will store the fetched secrets
+	SecretName string `json:"secretName,omitempty"`
 }
 
 // DopplerSecretStatus defines the observed state of DopplerSecret
-type DopplerSecretStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-}
+type DopplerSecretStatus struct{}
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
