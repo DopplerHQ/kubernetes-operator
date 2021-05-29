@@ -6,4 +6,14 @@ plugins:
   scorecard.sdk.operatorframework.io/v2: {}
 projectName: kubernetes-operator
 repo: github.com/DopplerHQ/kubernetes-operator
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: doppler.com
+  group: secrets
+  kind: DopplerSecret
+  path: github.com/DopplerHQ/kubernetes-operator/api/v1alpha1
+  version: v1alpha1
 version: "3"
