@@ -31,9 +31,14 @@ type DopplerSecretSpec struct {
 	// The name of the Kubernetes secret where the operator will store the fetched secrets
 	SecretName string `json:"secretName,omitempty"`
 
+	// The Doppler API host, defaults to https://api.doppler.com
 	Host string `json:"host,omitempty"`
 
+	// Whether or not to verify TLS, defaults to true
 	VerifyTLS string `json:"verifyTLS,omitempty"`
+
+	// The number of seconds to wait between resyncs, defaults to 60
+	ResyncSeconds int64 `json:"resyncSeconds,omitempty"`
 }
 
 // DopplerSecretStatus defines the observed state of DopplerSecret
