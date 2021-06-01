@@ -30,8 +30,8 @@ import (
 )
 
 const (
-	deploymentSecretUpdateAnnotation = "secrets.doppler.com/secretsupdate"
-	deploymentRestartAnnotation      = "secrets.doppler.com/reload"
+	deploymentSecretUpdateAnnotationPrefix = "secrets.doppler.com/secretsupdate"
+	deploymentRestartAnnotation            = "secrets.doppler.com/reload"
 )
 
 // Reconciles deployments marked with the restart annotation and that use the specified DopplerSecret.
@@ -97,17 +97,18 @@ func (r *DopplerSecretReconciler) IsDeploymentUsingSecret(deployment v1.Deployme
 // Specifically, if the Kubernetes secret version is different from the deployment's secret version annotation,
 // the annotation is updated to restart the deployment.
 func (r *DopplerSecretReconciler) ReconcileDeployment(deployment v1.Deployment, secret corev1.Secret) error {
-	annotationValue := fmt.Sprintf("%s-%s-%s", secret.Namespace, secret.Name, secret.Annotations[kubeSecretVersionAnnotation])
-	if deployment.Annotations[deploymentSecretUpdateAnnotation] == annotationValue &&
-		deployment.Spec.Template.Annotations[deploymentSecretUpdateAnnotation] == annotationValue {
+	annotationKey := fmt.Sprintf("%s.%s", deploymentSecretUpdateAnnotationPrefix, secret.Name)
+	annotationValue := secret.Annotations[kubeSecretVersionAnnotation]
+	if deployment.Annotations[annotationKey] == annotationValue &&
+		deployment.Spec.Template.Annotations[annotationKey] == annotationValue {
 		r.Log.Info("[-] Deployment is already running latest version, nothing to do", "deployment", deployment.Name)
 		return nil
 	}
-	deployment.Annotations[deploymentSecretUpdateAnnotation] = annotationValue
+	deployment.Annotations[annotationKey] = annotationValue
 	if deployment.Spec.Template.Annotations == nil {
 		deployment.Spec.Template.Annotations = make(map[string]string)
 	}
-	deployment.Spec.Template.Annotations[deploymentSecretUpdateAnnotation] = annotationValue
+	deployment.Spec.Template.Annotations[annotationKey] = annotationValue
 	err := r.Client.Update(context.Background(), &deployment)
 	if err != nil {
 		return fmt.Errorf("Failed to update deployment annotation: %w", err)
