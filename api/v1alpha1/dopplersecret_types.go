@@ -30,6 +30,10 @@ type DopplerSecretSpec struct {
 
 	// The name of the Kubernetes secret where the operator will store the fetched secrets
 	SecretName string `json:"secretName,omitempty"`
+
+	Host string `json:"host,omitempty"`
+
+	VerifyTLS string `json:"verifyTLS,omitempty"`
 }
 
 // DopplerSecretStatus defines the observed state of DopplerSecret
