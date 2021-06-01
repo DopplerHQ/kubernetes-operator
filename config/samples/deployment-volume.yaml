@@ -1,0 +1,38 @@
+{{/* This template is meant to be used with `doppler secrets substitute`. See README.md for more details. */}}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: doppler-test-deployment-volume
+  annotations:
+    secrets.doppler.com/reload: 'true'
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: doppler-test
+  template:
+    metadata:
+      labels:
+        app: doppler-test
+    spec:
+      volumes:
+        - name: secret-volume
+          secret:
+            secretName: "{{.SECRET_NAME}}"
+      containers:
+        - name: doppler-test
+          image: alpine
+          command: ['/bin/sh', '-c', 'apk add --no-cache tini > /dev/null 2>&1 && ls /etc/secrets | grep -v KUBERNETES_&& tini -s tail -f /dev/null']
+          imagePullPolicy: Always
+          volumeMounts:
+            - name: secret-volume
+              mountPath: /etc/secrets
+              readOnly: true
+          resources:
+            requests:
+              memory: '250Mi'
+              cpu: '250m'
+            limits:
+              memory: '500Mi'
+              cpu: '500m'
