@@ -18,8 +18,10 @@ package controllers
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -34,6 +36,10 @@ type DopplerSecretReconciler struct {
 	Scheme *runtime.Scheme
 }
 
+const (
+	requeueAfter = time.Second * 5
+)
+
 //+kubebuilder:rbac:groups=secrets.doppler.com,resources=dopplersecrets,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=secrets.doppler.com,resources=dopplersecrets/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=secrets.doppler.com,resources=dopplersecrets/finalizers,verbs=update
@@ -44,19 +50,51 @@ type DopplerSecretReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the DopplerSecret object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.8.3/pkg/reconcile
 func (r *DopplerSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = r.Log.WithValues("dopplersecret", req.NamespacedName)
+	log := r.Log.WithValues("dopplersecret", req.NamespacedName)
 
-	// your logic here
+	log.Info("Reconciling dopplersecret", "secret", req.NamespacedName)
 
-	return ctrl.Result{}, nil
+	dopplerSecret := secretsv1alpha1.DopplerSecret{}
+	err := r.Client.Get(context.Background(), req.NamespacedName, &dopplerSecret)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			log.Info("[-] dopplersecret not found, nothing to do", "secret", req.NamespacedName)
+			return ctrl.Result{}, nil
+		}
+		log.Error(err, "Unable to fetch dopplersecret", "secret", req.NamespacedName)
+		return ctrl.Result{
+			RequeueAfter: requeueAfter,
+		}, nil
+	}
+
+	if dopplerSecret.GetDeletionTimestamp() != nil {
+		log.Info("dopplersecret has been deleted, nothing to do", "secret", req.NamespacedName)
+		return ctrl.Result{}, nil
+	}
+
+	err = r.UpdateSecret(dopplerSecret)
+	if err != nil {
+		log.Error(err, "Unable to update dopplersecret", "secret", req.NamespacedName)
+		return ctrl.Result{
+			RequeueAfter: requeueAfter,
+		}, nil
+	}
+
+	err = r.ReconcileDeploymentsUsingSecret(dopplerSecret)
+	if err != nil {
+		log.Error(err, "Failed to update deployments", "secret", req.NamespacedName)
+		return ctrl.Result{
+			RequeueAfter: requeueAfter,
+		}, nil
+	}
+
+	log.Info("Finished reconciliation", "secret", req.NamespacedName)
+	return ctrl.Result{
+		RequeueAfter: requeueAfter,
+	}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
