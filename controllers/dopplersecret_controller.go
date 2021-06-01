@@ -37,7 +37,7 @@ type DopplerSecretReconciler struct {
 }
 
 const (
-	requeueAfter = time.Second * 5
+	defaultRequeueDuration = time.Minute
 )
 
 //+kubebuilder:rbac:groups=secrets.doppler.com,resources=dopplersecrets,verbs=get;list;watch;create;update;patch;delete
@@ -65,9 +65,15 @@ func (r *DopplerSecretReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 		log.Error(err, "Unable to fetch dopplersecret", "secret", req.NamespacedName)
 		return ctrl.Result{
-			RequeueAfter: requeueAfter,
+			RequeueAfter: defaultRequeueDuration,
 		}, nil
 	}
+
+	requeueAfter := defaultRequeueDuration
+	if dopplerSecret.Spec.ResyncSeconds != 0 {
+		requeueAfter = time.Second * time.Duration(dopplerSecret.Spec.ResyncSeconds)
+	}
+	log.Info("Requeue duration set", "requeueAfter", requeueAfter)
 
 	if dopplerSecret.GetDeletionTimestamp() != nil {
 		log.Info("dopplersecret has been deleted, nothing to do", "secret", req.NamespacedName)
