@@ -82,6 +82,7 @@ func (r *DopplerSecretReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	err = r.UpdateSecret(dopplerSecret)
+	r.SetUpdateSecretCondition(&dopplerSecret, err)
 	if err != nil {
 		log.Error(err, "Unable to update dopplersecret", "secret", req.NamespacedName)
 		return ctrl.Result{
@@ -90,6 +91,7 @@ func (r *DopplerSecretReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	err = r.ReconcileDeploymentsUsingSecret(dopplerSecret)
+	r.SetReconcileDeploymentsCondition(&dopplerSecret, err)
 	if err != nil {
 		log.Error(err, "Failed to update deployments", "secret", req.NamespacedName)
 		return ctrl.Result{
