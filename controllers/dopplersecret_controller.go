@@ -57,7 +57,7 @@ func (r *DopplerSecretReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	log.Info("Reconciling dopplersecret")
 
 	dopplerSecret := secretsv1alpha1.DopplerSecret{}
-	err := r.Client.Get(context.Background(), req.NamespacedName, &dopplerSecret)
+	err := r.Client.Get(ctx, req.NamespacedName, &dopplerSecret)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			log.Info("[-] dopplersecret not found, nothing to do")
@@ -80,8 +80,8 @@ func (r *DopplerSecretReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
-	err = r.UpdateSecret(dopplerSecret)
-	r.SetUpdateSecretCondition(&dopplerSecret, err)
+	err = r.UpdateSecret(ctx, dopplerSecret)
+	r.SetUpdateSecretCondition(ctx, &dopplerSecret, err)
 	if err != nil {
 		log.Error(err, "Unable to update dopplersecret")
 		return ctrl.Result{
@@ -89,8 +89,8 @@ func (r *DopplerSecretReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}, nil
 	}
 
-	err = r.ReconcileDeploymentsUsingSecret(dopplerSecret)
-	r.SetReconcileDeploymentsCondition(&dopplerSecret, err)
+	err = r.ReconcileDeploymentsUsingSecret(ctx, dopplerSecret)
+	r.SetReconcileDeploymentsCondition(ctx, &dopplerSecret, err)
 	if err != nil {
 		log.Error(err, "Failed to update deployments")
 		return ctrl.Result{

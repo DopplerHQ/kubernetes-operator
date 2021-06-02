@@ -35,10 +35,10 @@ const (
 )
 
 // Reconciles deployments marked with the restart annotation and that use the specified DopplerSecret.
-func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(dopplerSecret secretsv1alpha1.DopplerSecret) error {
+func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Context, dopplerSecret secretsv1alpha1.DopplerSecret) error {
 	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName())
 	deploymentList := &v1.DeploymentList{}
-	err := r.Client.List(context.Background(), deploymentList, &client.ListOptions{Namespace: dopplerSecret.Namespace})
+	err := r.Client.List(ctx, deploymentList, &client.ListOptions{Namespace: dopplerSecret.Namespace})
 	if err != nil {
 		return fmt.Errorf("Unable to fetch deployments: %w", err)
 	}
@@ -47,7 +47,7 @@ func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(dopplerSecret 
 		Name:      dopplerSecret.Spec.SecretName,
 	}
 	kubeSecret := &corev1.Secret{}
-	err = r.Client.Get(context.Background(), kubeSecretNamespacedName, kubeSecret)
+	err = r.Client.Get(ctx, kubeSecretNamespacedName, kubeSecret)
 	if err != nil {
 		return fmt.Errorf("Unable to fetch Kubernetes secret to update deployment: %w", err)
 	}
@@ -57,7 +57,7 @@ func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(dopplerSecret 
 			wg.Add(1)
 			go func(deployment v1.Deployment, kubeSecret corev1.Secret, wg *sync.WaitGroup) {
 				defer wg.Done()
-				err := r.ReconcileDeployment(deployment, kubeSecret)
+				err := r.ReconcileDeployment(ctx, deployment, kubeSecret)
 				if err != nil {
 					// Errors reconciling deployments are logged but not propagated up. Failed deployments will be reconciled on the next run.
 					log.Error(err, "Unable to reconcile deployment")
@@ -99,7 +99,7 @@ func (r *DopplerSecretReconciler) IsDeploymentUsingSecret(deployment v1.Deployme
 // Reconciles a deployment with a Kubernetes secret
 // Specifically, if the Kubernetes secret version is different from the deployment's secret version annotation,
 // the annotation is updated to restart the deployment.
-func (r *DopplerSecretReconciler) ReconcileDeployment(deployment v1.Deployment, secret corev1.Secret) error {
+func (r *DopplerSecretReconciler) ReconcileDeployment(ctx context.Context, deployment v1.Deployment, secret corev1.Secret) error {
 	log := r.Log.WithValues("deployment", fmt.Sprintf("%s/%s", deployment.Namespace, deployment.Name))
 	annotationKey := fmt.Sprintf("%s.%s", deploymentSecretUpdateAnnotationPrefix, secret.Name)
 	annotationValue := secret.Annotations[kubeSecretVersionAnnotation]
@@ -113,7 +113,7 @@ func (r *DopplerSecretReconciler) ReconcileDeployment(deployment v1.Deployment, 
 		deployment.Spec.Template.Annotations = make(map[string]string)
 	}
 	deployment.Spec.Template.Annotations[annotationKey] = annotationValue
-	err := r.Client.Update(context.Background(), &deployment)
+	err := r.Client.Update(ctx, &deployment)
 	if err != nil {
 		return fmt.Errorf("Failed to update deployment annotation: %w", err)
 	}

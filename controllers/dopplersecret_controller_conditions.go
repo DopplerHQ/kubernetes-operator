@@ -26,7 +26,7 @@ import (
 	secretsv1alpha1 "github.com/DopplerHQ/kubernetes-operator/api/v1alpha1"
 )
 
-func (r *DopplerSecretReconciler) SetUpdateSecretCondition(dopplerSecret *secretsv1alpha1.DopplerSecret, updateSecretsError error) {
+func (r *DopplerSecretReconciler) SetUpdateSecretCondition(ctx context.Context, dopplerSecret *secretsv1alpha1.DopplerSecret, updateSecretsError error) {
 	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName())
 	if dopplerSecret.Status.Conditions == nil {
 		dopplerSecret.Status.Conditions = []metav1.Condition{}
@@ -52,13 +52,13 @@ func (r *DopplerSecretReconciler) SetUpdateSecretCondition(dopplerSecret *secret
 			Message: "Deployment reload has been stopped due to secrets sync failure",
 		})
 	}
-	err := r.Client.Status().Update(context.Background(), dopplerSecret)
+	err := r.Client.Status().Update(ctx, dopplerSecret)
 	if err != nil {
 		log.Error(err, "Unable to set update secret condition")
 	}
 }
 
-func (r *DopplerSecretReconciler) SetReconcileDeploymentsCondition(dopplerSecret *secretsv1alpha1.DopplerSecret, deploymentError error) {
+func (r *DopplerSecretReconciler) SetReconcileDeploymentsCondition(ctx context.Context, dopplerSecret *secretsv1alpha1.DopplerSecret, deploymentError error) {
 	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName())
 	if dopplerSecret.Status.Conditions == nil {
 		dopplerSecret.Status.Conditions = []metav1.Condition{}
@@ -78,7 +78,7 @@ func (r *DopplerSecretReconciler) SetReconcileDeploymentsCondition(dopplerSecret
 			Message: fmt.Sprintf("Unable to reconcile deployments: %v", deploymentError),
 		})
 	}
-	err := r.Client.Status().Update(context.Background(), dopplerSecret)
+	err := r.Client.Status().Update(ctx, dopplerSecret)
 	if err != nil {
 		log.Error(err, "Unable to set reconcile deployments condition")
 	}

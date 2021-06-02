@@ -69,14 +69,14 @@ func GetDashboardLink(secrets []models.Secret) string {
 }
 
 // Updates a Kubernetes secret using the configuration specified in a DopplerSecret
-func (r *DopplerSecretReconciler) UpdateSecret(dopplerSecret secretsv1alpha1.DopplerSecret) error {
+func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecret secretsv1alpha1.DopplerSecret) error {
 	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName())
 	kubeSecretNamespacedName := types.NamespacedName{
 		Namespace: dopplerSecret.Namespace,
 		Name:      dopplerSecret.Spec.SecretName,
 	}
 	existingKubeSecret := &corev1.Secret{}
-	err := r.Client.Get(context.Background(), kubeSecretNamespacedName, existingKubeSecret)
+	err := r.Client.Get(ctx, kubeSecretNamespacedName, existingKubeSecret)
 	if err != nil {
 		// There is no existing secret, we'll need to create it
 		existingKubeSecret = nil
@@ -127,7 +127,7 @@ func (r *DopplerSecretReconciler) UpdateSecret(dopplerSecret secretsv1alpha1.Dop
 			Type: "Opaque",
 			Data: kubeSecretData,
 		}
-		err := r.Client.Create(context.Background(), newKubeSecret)
+		err := r.Client.Create(ctx, newKubeSecret)
 		if err != nil {
 			return fmt.Errorf("Failed to create Kubernetes secret: %w", err)
 		}
@@ -135,7 +135,7 @@ func (r *DopplerSecretReconciler) UpdateSecret(dopplerSecret secretsv1alpha1.Dop
 	} else {
 		existingKubeSecret.Data = kubeSecretData
 		existingKubeSecret.ObjectMeta.Annotations = kubeSecretAnnotations
-		err := r.Client.Update(context.Background(), existingKubeSecret)
+		err := r.Client.Update(ctx, existingKubeSecret)
 		if err != nil {
 			return fmt.Errorf("Failed to update Kubernetes secret: %w", err)
 		}
