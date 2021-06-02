@@ -2,6 +2,13 @@
 
 Automatically sync secrets from Doppler to Kubernetes and auto-reload deployments when secrets change.
 
+## Overview
+
+- The Doppler Kubernetes Operator is a controller run inside a deployment on your Kubernetes cluster
+- It manages custom resources called `DopplerSecret`s, which contain a Doppler Service Token and the name of the Kubernetes secret where Doppler secrets should be synced
+- The operator continuously monitors the Doppler API for changes to your Doppler config and updates the managed Kubernetes secret automatically
+- If the secrets have changed, the operator can also reload deployments using the Kubernetes secret. See below for details on configuring auto-reload.
+
 ## Step 1: Deploy the Operator
 
 Deploy the operator by running:
@@ -22,6 +29,12 @@ You can verify that the operator is running successfully in your cluster with th
 kubectl rollout status -w -n doppler-kubernetes-operator-system deployment/doppler-kubernetes-operator-controller-manager
 ```
 
+You can also view the operator's logs using the `logs` command:
+
+```bash
+kubectl logs -f -n doppler-kubernetes-operator-system deployments/doppler-kubernetes-operator-controller-manager -c manager
+```
+
 ## Step 2: Create a `DopplerSecret`
 
 A `DopplerSecret` is a custom Kubernetes resource with a secret name and a Doppler Service Token.
@@ -38,7 +51,7 @@ Check that the associated Kubernetes secret has been created:
 
 ```sh
 # List all Kubernetes secrets created by the Doppler controller
-kubectl describe secrets --selector=dopplerSecret=true
+kubectl describe secrets --selector=secrets.doppler.com/subtype=dopplerSecret
 ```
 
 The controller continuously watches for secret updates from Doppler and when detected, automatically and instantly updates the associated secret.
@@ -96,12 +109,20 @@ volumeMounts:
 
 ### Automatic Redeployments
 
-Adding automatic and instant reloading of a deployment requires just a single annotation on the Deployment:
+In order for the operator to reload a deployment, three things must be true:
+
+- The deployment is in the same namespace as the `DopplerSecret`
+- The deployment has the `secrets.doppler.com/reload` annotation set to `true`
+- The deployment is using the managed Kubernetes secret in one of the ways listed above
+
+Here's an example of the reload annotation:
 
 ```yaml
 annotations:
   secrets.doppler.com/reload: 'true'
 ```
+
+The Doppler Kubernetes operator reloads deployments by updating an annotation with the name `secrets.doppler.com/secretsupdate.<KUBERNETES_SECRET_NAME>`. When this update is made, Kubernetes will automatically redeploy your pods according to the [deployment's configured strategy](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy).
 
 ### Full Examples
 
@@ -124,7 +145,38 @@ Once the Deployment has completed, you can view the logs of the test container:
 kubectl logs -lapp=doppler-test
 ```
 
-## Debugging and Troubleshooting
+## Failure Strategy and Troubleshooting
+
+If the operator fails to fetch secrets from the Doppler API (e.g. a connection problem or invalid service token), no changes are made to the managed Kubernetes secret or your deployments. The operator will continue to attempt to reconnect to the Doppler API indefinitely.
+
+The `DopplerSecret` uses `status.conditions` to report its current state and any errors that may have occurred:
+
+```
+$ kubectl describe dopplersecrets
+Name:         dopplersecret-test
+Namespace:    default
+Labels:       <none>
+Annotations:  <none>
+API Version:  secrets.doppler.com/v1alpha1
+Kind:         DopplerSecret
+Metadata:
+  ...
+Spec:
+  ...
+Status:
+  Conditions:
+    Last Transition Time:  2021-06-02T15:46:57Z
+    Message:               Unable to update dopplersecret: Failed to fetch secrets from Doppler API: Doppler Error: Invalid Service token
+    Reason:                Error
+    Status:                False
+    Type:                  secrets.doppler.com/SecretSyncReady
+    Last Transition Time:  2021-06-02T15:46:57Z
+    Message:               Deployment reload has been stopped due to secrets sync failure
+    Reason:                Stopped
+    Status:                False
+    Type:                  secrets.doppler.com/DeploymentReloadReady
+Events:                    <none>
+```
 
 - [`hack/get-secret.sh`](hack/get-secret.sh) can be used to fetch and decode a Kubernetes secret
 
