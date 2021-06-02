@@ -42,7 +42,9 @@ type DopplerSecretSpec struct {
 }
 
 // DopplerSecretStatus defines the observed state of DopplerSecret
-type DopplerSecretStatus struct{}
+type DopplerSecretStatus struct {
+	Conditions []metav1.Condition `json:"conditions"`
+}
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
