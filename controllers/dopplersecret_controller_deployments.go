@@ -36,6 +36,7 @@ const (
 
 // Reconciles deployments marked with the restart annotation and that use the specified DopplerSecret.
 func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(dopplerSecret secretsv1alpha1.DopplerSecret) error {
+	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName())
 	deploymentList := &v1.DeploymentList{}
 	err := r.Client.List(context.Background(), deploymentList, &client.ListOptions{Namespace: dopplerSecret.Namespace})
 	if err != nil {
@@ -59,12 +60,14 @@ func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(dopplerSecret 
 				err := r.ReconcileDeployment(deployment, kubeSecret)
 				if err != nil {
 					// Errors reconciling deployments are logged but not propagated up. Failed deployments will be reconciled on the next run.
-					r.Log.Error(err, "Unable to reconcile deployment", "deployment", deployment.Name)
+					log.Error(err, "Unable to reconcile deployment")
 				}
 			}(deployment, *kubeSecret, &wg)
 		}
 	}
 	wg.Wait()
+
+	log.Info("Finished reconciling deployments", "numDeployments", len(deploymentList.Items))
 
 	return nil
 }
@@ -97,11 +100,12 @@ func (r *DopplerSecretReconciler) IsDeploymentUsingSecret(deployment v1.Deployme
 // Specifically, if the Kubernetes secret version is different from the deployment's secret version annotation,
 // the annotation is updated to restart the deployment.
 func (r *DopplerSecretReconciler) ReconcileDeployment(deployment v1.Deployment, secret corev1.Secret) error {
+	log := r.Log.WithValues("deployment", fmt.Sprintf("%s/%s", deployment.Namespace, deployment.Name))
 	annotationKey := fmt.Sprintf("%s.%s", deploymentSecretUpdateAnnotationPrefix, secret.Name)
 	annotationValue := secret.Annotations[kubeSecretVersionAnnotation]
 	if deployment.Annotations[annotationKey] == annotationValue &&
 		deployment.Spec.Template.Annotations[annotationKey] == annotationValue {
-		r.Log.Info("[-] Deployment is already running latest version, nothing to do", "deployment", deployment.Name)
+		log.Info("[-] Deployment is already running latest version, nothing to do")
 		return nil
 	}
 	deployment.Annotations[annotationKey] = annotationValue
@@ -113,6 +117,6 @@ func (r *DopplerSecretReconciler) ReconcileDeployment(deployment v1.Deployment, 
 	if err != nil {
 		return fmt.Errorf("Failed to update deployment annotation: %w", err)
 	}
-	r.Log.Info("[/] Updated deployment", "deployment", deployment.Name)
+	log.Info("[/] Updated deployment")
 	return nil
 }

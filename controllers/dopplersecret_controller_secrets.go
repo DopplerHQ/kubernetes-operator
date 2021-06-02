@@ -70,6 +70,7 @@ func GetDashboardLink(secrets []models.Secret) string {
 
 // Updates a Kubernetes secret using the configuration specified in a DopplerSecret
 func (r *DopplerSecretReconciler) UpdateSecret(dopplerSecret secretsv1alpha1.DopplerSecret) error {
+	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName())
 	kubeSecretNamespacedName := types.NamespacedName{
 		Namespace: dopplerSecret.Namespace,
 		Name:      dopplerSecret.Spec.SecretName,
@@ -81,7 +82,7 @@ func (r *DopplerSecretReconciler) UpdateSecret(dopplerSecret secretsv1alpha1.Dop
 		existingKubeSecret = nil
 	}
 
-	r.Log.Info(fmt.Sprintf("Fetching Doppler secrets for: %s", dopplerSecret.Name))
+	log.Info("Fetching Doppler secrets")
 	secretVersion := ""
 	if existingKubeSecret != nil {
 		secretVersion = existingKubeSecret.Annotations[kubeSecretVersionAnnotation]
@@ -91,10 +92,10 @@ func (r *DopplerSecretReconciler) UpdateSecret(dopplerSecret secretsv1alpha1.Dop
 		return fmt.Errorf("Failed to fetch secrets from Doppler API: %w", apiErr)
 	}
 	if !secretsResult.Modified {
-		r.Log.Info("[-] Doppler secrets not modified.")
+		log.Info("[-] Doppler secrets not modified.")
 		return nil
 	}
-	r.Log.Info("[/] Secrets have been modified", "oldVersion", secretVersion, "newVersion", secretsResult.ETag)
+	log.Info("[/] Secrets have been modified", "oldVersion", secretVersion, "newVersion", secretsResult.ETag)
 
 	kubeSecretData := map[string][]byte{}
 	for _, secret := range secretsResult.Secrets {
