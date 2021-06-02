@@ -27,6 +27,7 @@ import (
 )
 
 func (r *DopplerSecretReconciler) SetUpdateSecretCondition(dopplerSecret *secretsv1alpha1.DopplerSecret, updateSecretsError error) {
+	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName())
 	if dopplerSecret.Status.Conditions == nil {
 		dopplerSecret.Status.Conditions = []metav1.Condition{}
 	}
@@ -53,11 +54,12 @@ func (r *DopplerSecretReconciler) SetUpdateSecretCondition(dopplerSecret *secret
 	}
 	err := r.Client.Status().Update(context.Background(), dopplerSecret)
 	if err != nil {
-		r.Log.Error(err, "Unable to set update secret condition")
+		log.Error(err, "Unable to set update secret condition")
 	}
 }
 
 func (r *DopplerSecretReconciler) SetReconcileDeploymentsCondition(dopplerSecret *secretsv1alpha1.DopplerSecret, deploymentError error) {
+	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName())
 	if dopplerSecret.Status.Conditions == nil {
 		dopplerSecret.Status.Conditions = []metav1.Condition{}
 	}
@@ -78,6 +80,6 @@ func (r *DopplerSecretReconciler) SetReconcileDeploymentsCondition(dopplerSecret
 	}
 	err := r.Client.Status().Update(context.Background(), dopplerSecret)
 	if err != nil {
-		r.Log.Error(err, "Unable to set reconcile deployments condition")
+		log.Error(err, "Unable to set reconcile deployments condition")
 	}
 }

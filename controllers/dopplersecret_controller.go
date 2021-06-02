@@ -54,16 +54,16 @@ const (
 func (r *DopplerSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Log.WithValues("dopplersecret", req.NamespacedName)
 
-	log.Info("Reconciling dopplersecret", "secret", req.NamespacedName)
+	log.Info("Reconciling dopplersecret")
 
 	dopplerSecret := secretsv1alpha1.DopplerSecret{}
 	err := r.Client.Get(context.Background(), req.NamespacedName, &dopplerSecret)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			log.Info("[-] dopplersecret not found, nothing to do", "secret", req.NamespacedName)
+			log.Info("[-] dopplersecret not found, nothing to do")
 			return ctrl.Result{}, nil
 		}
-		log.Error(err, "Unable to fetch dopplersecret", "secret", req.NamespacedName)
+		log.Error(err, "Unable to fetch dopplersecret")
 		return ctrl.Result{
 			RequeueAfter: defaultRequeueDuration,
 		}, nil
@@ -76,14 +76,14 @@ func (r *DopplerSecretReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	log.Info("Requeue duration set", "requeueAfter", requeueAfter)
 
 	if dopplerSecret.GetDeletionTimestamp() != nil {
-		log.Info("dopplersecret has been deleted, nothing to do", "secret", req.NamespacedName)
+		log.Info("dopplersecret has been deleted, nothing to do")
 		return ctrl.Result{}, nil
 	}
 
 	err = r.UpdateSecret(dopplerSecret)
 	r.SetUpdateSecretCondition(&dopplerSecret, err)
 	if err != nil {
-		log.Error(err, "Unable to update dopplersecret", "secret", req.NamespacedName)
+		log.Error(err, "Unable to update dopplersecret")
 		return ctrl.Result{
 			RequeueAfter: requeueAfter,
 		}, nil
@@ -92,13 +92,13 @@ func (r *DopplerSecretReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	err = r.ReconcileDeploymentsUsingSecret(dopplerSecret)
 	r.SetReconcileDeploymentsCondition(&dopplerSecret, err)
 	if err != nil {
-		log.Error(err, "Failed to update deployments", "secret", req.NamespacedName)
+		log.Error(err, "Failed to update deployments")
 		return ctrl.Result{
 			RequeueAfter: requeueAfter,
 		}, nil
 	}
 
-	log.Info("Finished reconciliation", "secret", req.NamespacedName)
+	log.Info("Finished reconciliation")
 	return ctrl.Result{
 		RequeueAfter: requeueAfter,
 	}, nil

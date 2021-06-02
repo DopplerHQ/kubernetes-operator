@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"fmt"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -65,6 +67,10 @@ type DopplerSecretList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []DopplerSecret `json:"items"`
+}
+
+func (d DopplerSecret) GetNamespacedName() string {
+	return fmt.Sprintf("%s/%s", d.Namespace, d.Name)
 }
 
 func init() {
