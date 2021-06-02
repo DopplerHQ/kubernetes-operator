@@ -27,11 +27,14 @@ import (
 
 	secretsv1alpha1 "github.com/DopplerHQ/kubernetes-operator/api/v1alpha1"
 	"github.com/DopplerHQ/kubernetes-operator/pkg/api"
+	"github.com/DopplerHQ/kubernetes-operator/pkg/models"
 )
 
 const (
 	kubeSecretVersionAnnotation      = "secrets.doppler.com/version"
 	kubeSecretDopplerSecretLabel     = "dopplerSecret"
+	kubeSecretSubtypeLabel           = "subtype"
+	kubeSecretSubtypeLabelValue      = "dopplerSecret"
 	kubeSecretDopplerSecretNameLabel = "dopplerSecretName"
 )
 
@@ -50,6 +53,19 @@ func GetAPIContext(dopplerSecret secretsv1alpha1.DopplerSecret) api.APIContext {
 		VerifyTLS: verifyTLS,
 		APIKey:    dopplerSecret.Spec.ServiceToken,
 	}
+}
+
+func GetDashboardLink(secrets []models.Secret) string {
+	var projectSlug string
+	var configSlug string
+	for _, secret := range secrets {
+		if secret.Name == "DOPPLER_PROJECT" {
+			projectSlug = secret.Value
+		} else if secret.Name == "DOPPLER_CONFIG" {
+			configSlug = secret.Value
+		}
+	}
+	return fmt.Sprintf("https://dashboard.doppler.com/workplace/projects/%v/configs/%v", projectSlug, configSlug)
 }
 
 // Updates a Kubernetes secret using the configuration specified in a DopplerSecret
@@ -85,13 +101,13 @@ func (r *DopplerSecretReconciler) UpdateSecret(dopplerSecret secretsv1alpha1.Dop
 		kubeSecretData[secret.Name] = []byte(b64.StdEncoding.EncodeToString([]byte(secret.Value)))
 	}
 	kubeSecretAnnotations := map[string]string{
-		kubeSecretVersionAnnotation: secretsResult.ETag,
-	}
-	kubeSecretLabels := map[string]string{
-		kubeSecretDopplerSecretLabel:     "true",
-		kubeSecretDopplerSecretNameLabel: fmt.Sprintf("%v.%v", dopplerSecret.Namespace, dopplerSecret.Name),
+		kubeSecretVersionAnnotation:          secretsResult.ETag,
+		"secrets.doppler.com/dashboard-link": GetDashboardLink(secretsResult.Secrets),
 	}
 	if existingKubeSecret == nil {
+		kubeSecretLabels := map[string]string{
+			"secrets.doppler.com/subtype": "dopplerSecret",
+		}
 		newKubeSecret := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:        dopplerSecret.Spec.SecretName,
