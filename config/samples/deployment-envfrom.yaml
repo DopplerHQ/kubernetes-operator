@@ -23,7 +23,7 @@ spec:
           imagePullPolicy: Always
           envFrom:
             - secretRef:
-                name: "{{.SECRET_NAME}}"
+                name: doppler-test-secret # Kubernetes secret name
           resources:
             requests:
               memory: '250Mi'
