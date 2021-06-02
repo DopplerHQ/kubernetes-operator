@@ -147,6 +147,8 @@ kubectl logs -lapp=doppler-test
 
 ## Failure Strategy and Troubleshooting
 
+### Inspecting Status
+
 If the operator fails to fetch secrets from the Doppler API (e.g. a connection problem or invalid service token), no changes are made to the managed Kubernetes secret or your deployments. The operator will continue to attempt to reconnect to the Doppler API indefinitely.
 
 The `DopplerSecret` uses `status.conditions` to report its current state and any errors that may have occurred:
@@ -178,7 +180,9 @@ Status:
 Events:                    <none>
 ```
 
-- [`hack/get-secret.sh`](hack/get-secret.sh) can be used to fetch and decode a Kubernetes secret
+### Included Tools
+
+The [`tools/get-secret.sh`](tools/get-secret.sh) script can be used to fetch and decode a Kubernetes secret.
 
 ## Development
 
