@@ -1,5 +1,3 @@
-{{/* This template is meant to be used with `doppler secrets substitute`. See README.md for more details. */}}
-
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -23,7 +21,7 @@ spec:
           imagePullPolicy: Always
           envFrom:
             - secretRef:
-                name: "{{.SECRET_NAME}}"
+                name: doppler-test-secret # Kubernetes secret name
           resources:
             requests:
               memory: '250Mi'
