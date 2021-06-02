@@ -98,6 +98,14 @@ func (r *DopplerSecretReconciler) UpdateSecret(dopplerSecret secretsv1alpha1.Dop
 				Namespace:   dopplerSecret.Namespace,
 				Annotations: kubeSecretAnnotations,
 				Labels:      kubeSecretLabels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion: dopplerSecret.APIVersion,
+						Kind:       dopplerSecret.Kind,
+						Name:       dopplerSecret.Name,
+						UID:        dopplerSecret.UID,
+					},
+				},
 			},
 			Type: "Opaque",
 			Data: kubeSecretData,
