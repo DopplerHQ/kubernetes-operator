@@ -14,6 +14,10 @@ jobs:
         id: extract
         run: echo ::set-output name=version::${GITHUB_REF#refs/*/v}
 
+      - name: Print Version
+        run: |
+          echo ${{ steps.extract.outputs.version }}
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v1
 
