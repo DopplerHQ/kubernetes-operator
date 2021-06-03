@@ -67,6 +67,9 @@ func GetDashboardLink(secrets []models.Secret) string {
 			configSlug = secret.Value
 		}
 	}
+	if projectSlug == "" || configSlug == "" {
+		return "https://dashboard.doppler.com/workplace"
+	}
 	return fmt.Sprintf("https://dashboard.doppler.com/workplace/projects/%v/configs/%v", projectSlug, configSlug)
 }
 
