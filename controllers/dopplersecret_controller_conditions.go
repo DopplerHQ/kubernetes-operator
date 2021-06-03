@@ -26,7 +26,7 @@ import (
 	secretsv1alpha1 "github.com/DopplerHQ/kubernetes-operator/api/v1alpha1"
 )
 
-func (r *DopplerSecretReconciler) SetUpdateSecretCondition(ctx context.Context, dopplerSecret *secretsv1alpha1.DopplerSecret, updateSecretsError error) {
+func (r *DopplerSecretReconciler) SetSecretsSyncReadyCondition(ctx context.Context, dopplerSecret *secretsv1alpha1.DopplerSecret, updateSecretsError error) {
 	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName())
 	if dopplerSecret.Status.Conditions == nil {
 		dopplerSecret.Status.Conditions = []metav1.Condition{}
@@ -58,7 +58,7 @@ func (r *DopplerSecretReconciler) SetUpdateSecretCondition(ctx context.Context, 
 	}
 }
 
-func (r *DopplerSecretReconciler) SetReconcileDeploymentsCondition(ctx context.Context, dopplerSecret *secretsv1alpha1.DopplerSecret, deploymentError error) {
+func (r *DopplerSecretReconciler) SetDeploymentReloadReadyCondition(ctx context.Context, dopplerSecret *secretsv1alpha1.DopplerSecret, deploymentError error) {
 	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName())
 	if dopplerSecret.Status.Conditions == nil {
 		dopplerSecret.Status.Conditions = []metav1.Condition{}
