@@ -47,16 +47,16 @@ type DopplerSecretSpec struct {
 	// The reference to a Kubernetes secret where the operator will store and sync the fetched secrets
 	ManagedSecretRef SecretReference `json:"managedSecretRef,omitempty"`
 
-	// The Doppler API host, defaults to https://api.doppler.com
-	// +optional
+	// The Doppler API host
+	// +kubebuilder:default="https://api.doppler.com"
 	Host string `json:"host,omitempty"`
 
-	// Whether or not to verify TLS, defaults to true
-	// +optional
-	VerifyTLS string `json:"verifyTLS,omitempty"`
+	// Whether or not to verify TLS
+	// +kubebuilder:default=true
+	VerifyTLS bool `json:"verifyTLS,omitempty"`
 
-	// The number of seconds to wait between resyncs, defaults to 60
-	// +optional
+	// The number of seconds to wait between resyncs
+	// +kubebuilder:default=60
 	ResyncSeconds int64 `json:"resyncSeconds,omitempty"`
 }
 

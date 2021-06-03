@@ -41,17 +41,9 @@ const (
 
 // Generates an APIContext from a DopplerSecret
 func GetAPIContext(dopplerSecret secretsv1alpha1.DopplerSecret, dopplerToken string) api.APIContext {
-	host := "https://api.doppler.com"
-	if dopplerSecret.Spec.Host != "" {
-		host = dopplerSecret.Spec.Host
-	}
-	verifyTLS := true
-	if dopplerSecret.Spec.VerifyTLS != "" {
-		verifyTLS = dopplerSecret.Spec.VerifyTLS == "true"
-	}
 	return api.APIContext{
-		Host:      host,
-		VerifyTLS: verifyTLS,
+		Host:      dopplerSecret.Spec.Host,
+		VerifyTLS: dopplerSecret.Spec.VerifyTLS,
 		APIKey:    dopplerToken,
 	}
 }
@@ -102,7 +94,7 @@ func (r *DopplerSecretReconciler) GetDopplerToken(ctx context.Context, dopplerSe
 
 // Updates a Kubernetes secret using the configuration specified in a DopplerSecret
 func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecret secretsv1alpha1.DopplerSecret) error {
-	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName())
+	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName(), "verifyTLS", dopplerSecret.Spec.VerifyTLS, "host", dopplerSecret.Spec.Host)
 	if dopplerSecret.Spec.ManagedSecretRef.Namespace == "" {
 		dopplerSecret.Spec.ManagedSecretRef.Namespace = dopplerSecret.Namespace
 	}
