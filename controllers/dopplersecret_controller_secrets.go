@@ -92,6 +92,65 @@ func (r *DopplerSecretReconciler) GetDopplerToken(ctx context.Context, dopplerSe
 	return string(dopplerToken), nil
 }
 
+// Generate Kube secret data from a Doppler API secrets result
+func GetKubeSecretData(secretsResult models.SecretsResult) map[string][]byte {
+	kubeSecretData := map[string][]byte{}
+	for _, secret := range secretsResult.Secrets {
+		kubeSecretData[secret.Name] = []byte(b64.StdEncoding.EncodeToString([]byte(secret.Value)))
+	}
+	return kubeSecretData
+}
+
+// Generate Kube annotations from a Doppler API secrets result
+func GetKubeSecretAnnotations(secretsResult models.SecretsResult) map[string]string {
+	return map[string]string{
+		kubeSecretVersionAnnotation:          secretsResult.ETag,
+		"secrets.doppler.com/dashboard-link": GetDashboardLink(secretsResult.Secrets),
+	}
+}
+
+// Create a managed Kubernetes secret
+func (r *DopplerSecretReconciler) CreateManagedSecret(ctx context.Context, dopplerSecret secretsv1alpha1.DopplerSecret, secretsResult models.SecretsResult) error {
+	newKubeSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        dopplerSecret.Spec.ManagedSecretRef.Name,
+			Namespace:   dopplerSecret.Spec.ManagedSecretRef.Namespace,
+			Annotations: GetKubeSecretAnnotations(secretsResult),
+			Labels: map[string]string{
+				"secrets.doppler.com/subtype": "dopplerSecret",
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: dopplerSecret.APIVersion,
+					Kind:       dopplerSecret.Kind,
+					Name:       dopplerSecret.Name,
+					UID:        dopplerSecret.UID,
+				},
+			},
+		},
+		Type: "Opaque",
+		Data: GetKubeSecretData(secretsResult),
+	}
+	err := r.Client.Create(ctx, newKubeSecret)
+	if err != nil {
+		return fmt.Errorf("Failed to create Kubernetes secret: %w", err)
+	}
+	r.Log.Info("[/] Successfully created new Kubernetes secret")
+	return nil
+}
+
+// Update a managed Kubernetes secret
+func (r *DopplerSecretReconciler) UpdateManagedSecret(ctx context.Context, secret corev1.Secret, dopplerSecret secretsv1alpha1.DopplerSecret, secretsResult models.SecretsResult) error {
+	secret.Data = GetKubeSecretData(secretsResult)
+	secret.ObjectMeta.Annotations = GetKubeSecretAnnotations(secretsResult)
+	err := r.Client.Update(ctx, &secret)
+	if err != nil {
+		return fmt.Errorf("Failed to update Kubernetes secret: %w", err)
+	}
+	r.Log.Info("[/] Successfully updated existing Kubernetes secret")
+	return nil
+}
+
 // Updates a Kubernetes secret using the configuration specified in a DopplerSecret
 func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecret secretsv1alpha1.DopplerSecret) error {
 	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName(), "verifyTLS", dopplerSecret.Spec.VerifyTLS, "host", dopplerSecret.Spec.Host)
@@ -127,49 +186,9 @@ func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecre
 	}
 	log.Info("[/] Secrets have been modified", "oldVersion", secretVersion, "newVersion", secretsResult.ETag)
 
-	kubeSecretData := map[string][]byte{}
-	for _, secret := range secretsResult.Secrets {
-		kubeSecretData[secret.Name] = []byte(b64.StdEncoding.EncodeToString([]byte(secret.Value)))
-	}
-	kubeSecretAnnotations := map[string]string{
-		kubeSecretVersionAnnotation:          secretsResult.ETag,
-		"secrets.doppler.com/dashboard-link": GetDashboardLink(secretsResult.Secrets),
-	}
 	if existingKubeSecret == nil {
-		kubeSecretLabels := map[string]string{
-			"secrets.doppler.com/subtype": "dopplerSecret",
-		}
-		newKubeSecret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:        dopplerSecret.Spec.ManagedSecretRef.Name,
-				Namespace:   dopplerSecret.Spec.ManagedSecretRef.Namespace,
-				Annotations: kubeSecretAnnotations,
-				Labels:      kubeSecretLabels,
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion: dopplerSecret.APIVersion,
-						Kind:       dopplerSecret.Kind,
-						Name:       dopplerSecret.Name,
-						UID:        dopplerSecret.UID,
-					},
-				},
-			},
-			Type: "Opaque",
-			Data: kubeSecretData,
-		}
-		err := r.Client.Create(ctx, newKubeSecret)
-		if err != nil {
-			return fmt.Errorf("Failed to create Kubernetes secret: %w", err)
-		}
-		r.Log.Info("[/] Successfully created new Kubernetes secret")
+		return r.CreateManagedSecret(ctx, dopplerSecret, *secretsResult)
 	} else {
-		existingKubeSecret.Data = kubeSecretData
-		existingKubeSecret.ObjectMeta.Annotations = kubeSecretAnnotations
-		err := r.Client.Update(ctx, existingKubeSecret)
-		if err != nil {
-			return fmt.Errorf("Failed to update Kubernetes secret: %w", err)
-		}
-		r.Log.Info("[/] Successfully updated existing Kubernetes secret")
+		return r.UpdateManagedSecret(ctx, *existingKubeSecret, dopplerSecret, *secretsResult)
 	}
-	return nil
 }
