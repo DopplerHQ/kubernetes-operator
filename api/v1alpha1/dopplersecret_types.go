@@ -25,21 +25,38 @@ import (
 // This file is meant to be modified as specs change.
 // Important: Run "make" to regenerate code after modifying this file
 
+// A reference to a Kubernetes secret
+type SecretReference struct {
+	// The name of the Secret resource
+	Name string `json:"name"`
+
+	// Namespace of the resource being referred to. Ignored if not cluster scoped
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// The key within the Secret resource, if required.
+	// +optional
+	Key string `json:"key,omitempty"`
+}
+
 // DopplerSecretSpec defines the desired state of DopplerSecret
 type DopplerSecretSpec struct {
-	// A Doppler service token, used to interact with the Doppler API
-	ServiceToken string `json:"serviceToken,omitempty"`
+	// The reference to a Kubernetes secret containing the Doppler service token
+	TokenSecretRef SecretReference `json:"tokenSecretRef,omitempty"`
 
-	// The name of the Kubernetes secret where the operator will store the fetched secrets
-	SecretName string `json:"secretName,omitempty"`
+	// The reference to a Kubernetes secret where the operator will store and sync the fetched secrets
+	ManagedSecretRef SecretReference `json:"managedSecretRef,omitempty"`
 
 	// The Doppler API host, defaults to https://api.doppler.com
+	// +optional
 	Host string `json:"host,omitempty"`
 
 	// Whether or not to verify TLS, defaults to true
+	// +optional
 	VerifyTLS string `json:"verifyTLS,omitempty"`
 
 	// The number of seconds to wait between resyncs, defaults to 60
+	// +optional
 	ResyncSeconds int64 `json:"resyncSeconds,omitempty"`
 }
 

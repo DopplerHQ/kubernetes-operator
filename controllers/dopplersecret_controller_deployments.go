@@ -37,14 +37,18 @@ const (
 // Reconciles deployments marked with the restart annotation and that use the specified DopplerSecret.
 func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Context, dopplerSecret secretsv1alpha1.DopplerSecret) error {
 	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName())
+	namespace := dopplerSecret.Namespace
+	if dopplerSecret.Spec.ManagedSecretRef.Namespace != "" {
+		namespace = dopplerSecret.Spec.ManagedSecretRef.Namespace
+	}
 	deploymentList := &v1.DeploymentList{}
-	err := r.Client.List(ctx, deploymentList, &client.ListOptions{Namespace: dopplerSecret.Namespace})
+	err := r.Client.List(ctx, deploymentList, &client.ListOptions{Namespace: namespace})
 	if err != nil {
 		return fmt.Errorf("Unable to fetch deployments: %w", err)
 	}
 	kubeSecretNamespacedName := types.NamespacedName{
-		Namespace: dopplerSecret.Namespace,
-		Name:      dopplerSecret.Spec.SecretName,
+		Namespace: namespace,
+		Name:      dopplerSecret.Spec.ManagedSecretRef.Name,
 	}
 	kubeSecret := &corev1.Secret{}
 	err = r.Client.Get(ctx, kubeSecretNamespacedName, kubeSecret)
@@ -75,20 +79,21 @@ func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Co
 // Evaluates whether or not the deployment is using the specified DopplerSecret.
 // Specifically, a deployment is using a DopplerSecret if it references it using `envFrom`, `secretKeyRef` or `volumes`.
 func (r *DopplerSecretReconciler) IsDeploymentUsingSecret(deployment v1.Deployment, dopplerSecret secretsv1alpha1.DopplerSecret) bool {
+	managedSecretName := dopplerSecret.Spec.ManagedSecretRef.Name
 	for _, container := range deployment.Spec.Template.Spec.Containers {
 		for _, envFrom := range container.EnvFrom {
-			if envFrom.SecretRef != nil && envFrom.SecretRef.LocalObjectReference.Name == dopplerSecret.Spec.SecretName {
+			if envFrom.SecretRef != nil && envFrom.SecretRef.LocalObjectReference.Name == managedSecretName {
 				return true
 			}
 		}
 		for _, env := range container.Env {
-			if env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil && env.ValueFrom.SecretKeyRef.LocalObjectReference.Name == dopplerSecret.Spec.SecretName {
+			if env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil && env.ValueFrom.SecretKeyRef.LocalObjectReference.Name == managedSecretName {
 				return true
 			}
 		}
 	}
 	for _, volume := range deployment.Spec.Template.Spec.Volumes {
-		if volume.Secret != nil && volume.Secret.SecretName == dopplerSecret.Spec.SecretName {
+		if volume.Secret != nil && volume.Secret.SecretName == managedSecretName {
 			return true
 		}
 	}

@@ -5,7 +5,7 @@ Automatically sync secrets from Doppler to Kubernetes and auto-reload deployment
 ## Overview
 
 - The Doppler Kubernetes Operator is a controller run inside a deployment on your Kubernetes cluster
-- It manages custom resources called `DopplerSecret`s, which contain a Doppler Service Token and the name of the Kubernetes secret where Doppler secrets should be synced
+- It manages custom resources called `DopplerSecret`s, each of which contains a reference to a Kubernetes secret containing your Doppler Service Token and a reference to the Kubernetes secret where Doppler secrets should be synced
 - The operator continuously monitors the Doppler API for changes to your Doppler config and updates the managed Kubernetes secret automatically
 - If the secrets have changed, the operator can also reload deployments using the Kubernetes secret. See below for details on configuring auto-reload.
 
@@ -27,11 +27,39 @@ You can verify that the operator is running successfully in your cluster with `.
 
 ## Step 2: Create a `DopplerSecret`
 
-A `DopplerSecret` is a custom Kubernetes resource with a secret name and a Doppler Service Token.
+A `DopplerSecret` is a custom Kubernetes resource with references to two secrets:
 
-When a `DopplerSecret` is created, the operator reconciles it by creating an associated Kubernetes secret and populates it with secrets fetched from the Doppler API in Key-Value format.
+- A Kubernetes secret where your Doppler Service Token is stored. This token will be used to fetch secrets from your Doppler config.
+- A Kubernetes secret where your synced Doppler secrets will be stored. This secret will be created by the operator if it does not already exist.
 
-To follow along with this example, modify `config/samples/secrets_v1alpha1_dopplersecret.yaml` with your [Doppler Service Token](https://docs.doppler.com/docs/enclave-service-tokens).
+Create your token Kubernetes secret using the following command:
+
+```bash
+kubectl create secret generic doppler-token-secret --from-literal=dopplerToken=dp.st.dev.XXXX
+```
+
+If you have the Doppler CLI installed, you can generate a Doppler Service Token directly from the CLI:
+
+```bash
+kubectl create secret generic doppler-token-secret --from-literal=dopplerToken=$(doppler configs tokens create doppler-kubernetes-operator --plain)
+```
+
+Next, create a `DopplerSecret` that references your token secret.
+
+```yaml
+apiVersion: secrets.doppler.com/v1alpha1
+kind: DopplerSecret
+metadata:
+  name: dopplersecret-test # DopplerSecret resource name
+spec:
+  tokenSecretRef: # Reference to the Kubernetes secret containing your Doppler Service Token
+    name: doppler-token-secret
+    key: dopplerToken
+  managedSecretRef: # Reference to the Kubernetes secret where your Doppler secrets will be synced
+    name: doppler-test-secret
+```
+
+If you're following along with these example names, you can apply the sample directly:
 
 ```bash
 kubectl apply -f config/samples/secrets_v1alpha1_dopplersecret.yaml
