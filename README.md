@@ -23,17 +23,7 @@ This will use your locally-configured `kubectl` to:
 - Setup a service account and RBAC role for the operator
 - Create a deployment for the operator inside of the cluster
 
-You can verify that the operator is running successfully in your cluster with the `rollout` command:
-
-```bash
-kubectl rollout status -w -n doppler-kubernetes-operator-system deployment/doppler-kubernetes-operator-controller-manager
-```
-
-You can also view the operator's logs using the `logs` command:
-
-```bash
-kubectl logs -f -n doppler-kubernetes-operator-system deployments/doppler-kubernetes-operator-controller-manager -c manager
-```
+You can verify that the operator is running successfully in your cluster with `./tools/operator-logs.sh`, this waits for the deployment to roll out and then tails the log.
 
 ## Step 2: Create a `DopplerSecret`
 
@@ -182,7 +172,8 @@ Events:                    <none>
 
 ### Included Tools
 
-The [`tools/get-secret.sh`](tools/get-secret.sh) script can be used to fetch and decode a Kubernetes secret.
+- [`tools/get-secret.sh`](tools/get-secret.sh) - fetch and decode a Kubernetes secret
+- [`tools/operator-logs.sh`](tools/operator-logs) - wait for the operator deployment to roll out, then tail the logs
 
 ## Development
 
