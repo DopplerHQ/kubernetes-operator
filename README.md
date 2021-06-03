@@ -4,7 +4,7 @@ Automatically sync secrets from Doppler to Kubernetes and auto-reload deployment
 
 ## Overview
 
-- The Doppler Kubernetes Operator is a controller run inside a deployment on your Kubernetes cluster
+- The Doppler Kubernetes Operator is a controller which runs inside a deployment on your Kubernetes cluster
 - It manages custom resources called `DopplerSecret`s, each of which contains a reference to a Kubernetes secret containing your Doppler Service Token and a reference to the Kubernetes secret where Doppler secrets should be synced
 - The operator continuously monitors the Doppler API for changes to your Doppler config and updates the managed Kubernetes secret automatically
 - If the secrets have changed, the operator can also reload deployments using the Kubernetes secret. See below for details on configuring auto-reload.
@@ -23,7 +23,7 @@ This will use your locally-configured `kubectl` to:
 - Setup a service account and RBAC role for the operator
 - Create a deployment for the operator inside of the cluster
 
-You can verify that the operator is running successfully in your cluster with `./tools/operator-logs.sh`, this waits for the deployment to roll out and then tails the log.
+You can verify that the operator is running successfully in your cluster with `./tools/operator-logs.sh`, this waits for the deployment to roll out and then tails the log. You can leave this command running to keep monitoring the logs or quit safely with Ctrl-C.
 
 ## Step 2: Create a `DopplerSecret`
 
@@ -32,7 +32,7 @@ A `DopplerSecret` is a custom Kubernetes resource with references to two secrets
 - A Kubernetes secret where your Doppler Service Token is stored. This token will be used to fetch secrets from your Doppler config.
 - A Kubernetes secret where your synced Doppler secrets will be stored. This secret will be created by the operator if it does not already exist.
 
-Create your token Kubernetes secret using the following command:
+Generate a Doppler Service Token and use it in this command to create your token Kubernetes secret:
 
 ```bash
 kubectl create secret generic doppler-token-secret --from-literal=dopplerToken=dp.st.dev.XXXX
@@ -44,7 +44,7 @@ If you have the Doppler CLI installed, you can generate a Doppler Service Token 
 kubectl create secret generic doppler-token-secret --from-literal=dopplerToken=$(doppler configs tokens create doppler-kubernetes-operator --plain)
 ```
 
-Next, create a `DopplerSecret` that references your token secret.
+Next, we'll create a `DopplerSecret` that references your token secret.
 
 ```yaml
 apiVersion: secrets.doppler.com/v1alpha1
@@ -72,7 +72,7 @@ Check that the associated Kubernetes secret has been created:
 kubectl describe secrets --selector=secrets.doppler.com/subtype=dopplerSecret
 ```
 
-The controller continuously watches for secret updates from Doppler and when detected, automatically and instantly updates the associated secret.
+The controller continuously watches for secret updates from Doppler and when detected, automatically and instantly updates the associated secret. Keep in mind that managed secrets are owned by `DopplerSecret`s, so deleting a `DopplerSecret` will automatically delete the managed Kubernetes secret.
 
 Next, we'll cover how to configure a deployment to use the Kubernetes secret and enable auto-reloading for Deployments.
 
@@ -129,9 +129,9 @@ volumeMounts:
 
 In order for the operator to reload a deployment, three things must be true:
 
-- The deployment is in the same namespace as the `DopplerSecret`
-- The deployment has the `secrets.doppler.com/reload` annotation set to `true`
-- The deployment is using the managed Kubernetes secret in one of the ways listed above
+- The deployment is in the same namespace as the managed Kubernetes secret
+- The deployment has the `secrets.doppler.com/reload` annotation set to `'true'` (string)
+- The deployment uses the managed secret
 
 Here's an example of the reload annotation:
 
@@ -150,7 +150,7 @@ Complete examples of these different deployment configurations can be found belo
 - [`deployment-valuefrom.yaml`](config/samples/deployment-valuefrom.yaml)
 - [`deployment-volume.yaml`](config/samples/deployment-volume.yaml)
 
-If you've named your Kubernetes secret `doppler-test-secret` in the previous step, you can apply any of these examples directly:
+If you've named your managed Kubernetes secret `doppler-test-secret` in the previous step, you can apply any of these examples directly:
 
 ```sh
 kubectl apply -f config/samples/deployment-envfrom.yaml
@@ -169,7 +169,9 @@ kubectl logs -lapp=doppler-test
 
 If the operator fails to fetch secrets from the Doppler API (e.g. a connection problem or invalid service token), no changes are made to the managed Kubernetes secret or your deployments. The operator will continue to attempt to reconnect to the Doppler API indefinitely.
 
-The `DopplerSecret` uses `status.conditions` to report its current state and any errors that may have occurred:
+The `DopplerSecret` uses `status.conditions` to report its current state and any errors that may have occurred.
+
+In this example, our Doppler service token has been revoked and the operator is reporting an error condition:
 
 ```
 $ kubectl describe dopplersecrets
@@ -197,6 +199,8 @@ Status:
     Type:                  secrets.doppler.com/DeploymentReloadReady
 Events:                    <none>
 ```
+
+You can safely modify your token Kubernetes secret or `DopplerSecret` at any time. To update our Doppler service token we can modify our token Kubernetes secret directly and the changes will take effect immediately.
 
 ### Included Tools
 
