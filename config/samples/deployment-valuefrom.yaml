@@ -17,7 +17,7 @@ spec:
       containers:
         - name: doppler-test
           image: alpine
-          command: ['/bin/sh', '-c', 'apk add --no-cache tini > /dev/null 2>&1 && printenv | grep -v KUBERNETES_ && tini -s tail -f /dev/null']
+          command: ['/bin/sh', '-c', 'apk add --no-cache tini > /dev/null 2>&1 && printenv | grep -v KUBERNETES_ && tini -s tail -f /dev/null'] # Print all non-Kubernetes environment variables
           imagePullPolicy: Always
           env:
             - name: MY_APP_SECRET # The name of the environment variable exposed in the container
