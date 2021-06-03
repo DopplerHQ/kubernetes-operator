@@ -186,3 +186,7 @@ make install run
 ```
 
 See the [Operator SDK Go Tutorial](https://sdk.operatorframework.io/docs/building-operators/golang/tutorial/#run-the-operator) for more information.
+
+## Release
+
+This project is released with Github Actions. Adding a Github Release will start an action which builds the operator image and publishes it to DockerHub. Tag names should match the pattern `vX.X.X`.
