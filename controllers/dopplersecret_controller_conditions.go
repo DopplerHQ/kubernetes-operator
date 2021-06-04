@@ -58,7 +58,7 @@ func (r *DopplerSecretReconciler) SetSecretsSyncReadyCondition(ctx context.Conte
 	}
 }
 
-func (r *DopplerSecretReconciler) SetDeploymentReloadReadyCondition(ctx context.Context, dopplerSecret *secretsv1alpha1.DopplerSecret, deploymentError error) {
+func (r *DopplerSecretReconciler) SetDeploymentReloadReadyCondition(ctx context.Context, dopplerSecret *secretsv1alpha1.DopplerSecret, numDeployments int, deploymentError error) {
 	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName())
 	if dopplerSecret.Status.Conditions == nil {
 		dopplerSecret.Status.Conditions = []metav1.Condition{}
@@ -68,7 +68,7 @@ func (r *DopplerSecretReconciler) SetDeploymentReloadReadyCondition(ctx context.
 			Type:    "secrets.doppler.com/DeploymentReloadReady",
 			Status:  metav1.ConditionTrue,
 			Reason:  "OK",
-			Message: "Controller is ready to reload deployments",
+			Message: fmt.Sprintf("Controller is ready to reload deployments. %v found.", numDeployments),
 		})
 	} else {
 		meta.SetStatusCondition(&dopplerSecret.Status.Conditions, metav1.Condition{

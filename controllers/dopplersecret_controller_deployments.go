@@ -35,7 +35,7 @@ const (
 )
 
 // Reconciles deployments marked with the restart annotation and that use the specified DopplerSecret.
-func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Context, dopplerSecret secretsv1alpha1.DopplerSecret) error {
+func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Context, dopplerSecret secretsv1alpha1.DopplerSecret) (int, error) {
 	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName())
 	namespace := dopplerSecret.Namespace
 	if dopplerSecret.Spec.ManagedSecretRef.Namespace != "" {
@@ -44,7 +44,7 @@ func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Co
 	deploymentList := &v1.DeploymentList{}
 	err := r.Client.List(ctx, deploymentList, &client.ListOptions{Namespace: namespace})
 	if err != nil {
-		return fmt.Errorf("Unable to fetch deployments: %w", err)
+		return 0, fmt.Errorf("Unable to fetch deployments: %w", err)
 	}
 	kubeSecretNamespacedName := types.NamespacedName{
 		Namespace: namespace,
@@ -53,7 +53,7 @@ func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Co
 	kubeSecret := &corev1.Secret{}
 	err = r.Client.Get(ctx, kubeSecretNamespacedName, kubeSecret)
 	if err != nil {
-		return fmt.Errorf("Unable to fetch Kubernetes secret to update deployment: %w", err)
+		return 0, fmt.Errorf("Unable to fetch Kubernetes secret to update deployment: %w", err)
 	}
 	var wg sync.WaitGroup
 	for _, deployment := range deploymentList.Items {
@@ -73,7 +73,7 @@ func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Co
 
 	log.Info("Finished reconciling deployments", "numDeployments", len(deploymentList.Items))
 
-	return nil
+	return len(deploymentList.Items), nil
 }
 
 // Evaluates whether or not the deployment is using the specified DopplerSecret.
