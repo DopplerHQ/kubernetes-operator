@@ -178,7 +178,7 @@ func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecre
 	}
 	secretsResult, apiErr := api.GetSecrets(GetAPIContext(dopplerSecret, dopplerToken), secretVersion)
 	if apiErr != nil {
-		return fmt.Errorf("Failed to fetch secrets from Doppler API: %w", apiErr)
+		return apiErr
 	}
 	if !secretsResult.Modified {
 		log.Info("[-] Doppler secrets not modified.")

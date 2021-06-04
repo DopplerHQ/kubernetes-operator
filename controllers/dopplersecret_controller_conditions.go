@@ -43,7 +43,7 @@ func (r *DopplerSecretReconciler) SetSecretsSyncReadyCondition(ctx context.Conte
 			Type:    "secrets.doppler.com/SecretSyncReady",
 			Status:  metav1.ConditionFalse,
 			Reason:  "Error",
-			Message: fmt.Sprintf("Unable to update dopplersecret: %v", updateSecretsError),
+			Message: fmt.Sprintf("Secret update failed: %v", updateSecretsError),
 		})
 		meta.SetStatusCondition(&dopplerSecret.Status.Conditions, metav1.Condition{
 			Type:    "secrets.doppler.com/DeploymentReloadReady",
@@ -75,7 +75,7 @@ func (r *DopplerSecretReconciler) SetDeploymentReloadReadyCondition(ctx context.
 			Type:    "secrets.doppler.com/DeploymentReloadReady",
 			Status:  metav1.ConditionFalse,
 			Reason:  "Error",
-			Message: fmt.Sprintf("Unable to reconcile deployments: %v", deploymentError),
+			Message: fmt.Sprintf("Deployment reconcile failed: %v", deploymentError),
 		})
 	}
 	err := r.Client.Status().Update(ctx, dopplerSecret)

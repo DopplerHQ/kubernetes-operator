@@ -188,7 +188,7 @@ Spec:
 Status:
   Conditions:
     Last Transition Time:  2021-06-02T15:46:57Z
-    Message:               Unable to update dopplersecret: Failed to fetch secrets from Doppler API: Doppler Error: Invalid Service token
+    Message:               Secret update failed: Doppler Error: Invalid Service token
     Reason:                Error
     Status:                False
     Type:                  secrets.doppler.com/SecretSyncReady
