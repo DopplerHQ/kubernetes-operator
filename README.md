@@ -225,6 +225,16 @@ The `DopplerSecret` resource manages the managed Kubernetes secret but does not 
 - [`tools/get-secret.sh`](tools/get-secret.sh) - fetch and decode a Kubernetes secret
 - [`tools/operator-logs.sh`](tools/operator-logs) - wait for the operator deployment to roll out, then tail the logs
 
+## Uninstalling
+
+To uninstall the operator, first delete any `DopplerSecret` resources and any referenced Kubernetes secrets that are no longer needed.
+
+Then, run the following command to delete all of the resources created during the initial `make deploy`:
+
+```bash
+make undeploy
+```
+
 ## Development
 
 This project uses the [Operator SDK](https://sdk.operatorframework.io).
