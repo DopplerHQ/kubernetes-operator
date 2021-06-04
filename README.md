@@ -2,6 +2,8 @@
 
 Automatically sync secrets from Doppler to Kubernetes and auto-reload deployments when secrets change.
 
+![Doppler Kubernetes Operator Diagram](docs/diagram.png)
+
 ## Overview
 
 - The Doppler Kubernetes Operator is a controller which runs inside a deployment on your Kubernetes cluster
