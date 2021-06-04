@@ -119,14 +119,6 @@ func (r *DopplerSecretReconciler) CreateManagedSecret(ctx context.Context, doppl
 			Labels: map[string]string{
 				"secrets.doppler.com/subtype": "dopplerSecret",
 			},
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: dopplerSecret.APIVersion,
-					Kind:       dopplerSecret.Kind,
-					Name:       dopplerSecret.Name,
-					UID:        dopplerSecret.UID,
-				},
-			},
 		},
 		Type: "Opaque",
 		Data: GetKubeSecretData(secretsResult),
