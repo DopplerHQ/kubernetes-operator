@@ -177,6 +177,8 @@ Once the Deployment has completed, you can view the logs of the test container:
 kubectl logs -lapp=doppler-test
 ```
 
+Setup is complete! To test the sync behavior, modify a secret in the Doppler dashboard and wait 60 seconds. Run the logs command again (or use the `watch` command) to see the pods automatically restart with the new secret data.
+
 ## Failure Strategy and Troubleshooting
 
 ### Inspecting Status
@@ -188,9 +190,9 @@ The `DopplerSecret` uses `status.conditions` to report its current state and any
 In this example, our Doppler service token has been revoked and the operator is reporting an error condition:
 
 ```
-$ kubectl describe dopplersecrets
+$ kubectl describe dopplersecrets -n doppler-operator-system
 Name:         dopplersecret-test
-Namespace:    default
+Namespace:    doppler-operator-system
 Labels:       <none>
 Annotations:  <none>
 API Version:  secrets.doppler.com/v1alpha1
