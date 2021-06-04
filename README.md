@@ -35,13 +35,13 @@ A `DopplerSecret` is a custom Kubernetes resource with references to two secrets
 Generate a Doppler Service Token and use it in this command to create your token Kubernetes secret:
 
 ```bash
-kubectl create secret generic doppler-token-secret --from-literal=dopplerToken=dp.st.dev.XXXX
+kubectl create secret generic doppler-token-secret -n doppler-operator-system --from-literal=dopplerToken=dp.st.dev.XXXX
 ```
 
 If you have the Doppler CLI installed, you can generate a Doppler Service Token directly from the CLI:
 
 ```bash
-kubectl create secret generic doppler-token-secret --from-literal=dopplerToken=$(doppler configs tokens create doppler-kubernetes-operator --plain)
+kubectl create secret generic doppler-token-secret -n doppler-operator-system --from-literal=dopplerToken=$(doppler configs tokens create doppler-kubernetes-operator --plain)
 ```
 
 Next, we'll create a `DopplerSecret` that references your token secret.
