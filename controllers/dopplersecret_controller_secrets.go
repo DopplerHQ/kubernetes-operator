@@ -18,7 +18,6 @@ package controllers
 
 import (
 	"context"
-	b64 "encoding/base64"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
@@ -96,7 +95,7 @@ func (r *DopplerSecretReconciler) GetDopplerToken(ctx context.Context, dopplerSe
 func GetKubeSecretData(secretsResult models.SecretsResult) map[string][]byte {
 	kubeSecretData := map[string][]byte{}
 	for _, secret := range secretsResult.Secrets {
-		kubeSecretData[secret.Name] = []byte(b64.StdEncoding.EncodeToString([]byte(secret.Value)))
+		kubeSecretData[secret.Name] = []byte(secret.Value)
 	}
 	return kubeSecretData
 }
