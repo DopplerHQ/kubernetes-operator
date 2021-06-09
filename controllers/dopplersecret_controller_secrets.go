@@ -36,6 +36,7 @@ const (
 	kubeSecretSubtypeLabel           = "subtype"
 	kubeSecretSubtypeLabelValue      = "dopplerSecret"
 	kubeSecretDopplerSecretNameLabel = "dopplerSecretName"
+	kubeSecretServiceTokenKey        = "serviceToken"
 )
 
 // Generates an APIContext from a DopplerSecret
@@ -84,9 +85,9 @@ func (r *DopplerSecretReconciler) GetDopplerToken(ctx context.Context, dopplerSe
 	if err != nil {
 		return "", fmt.Errorf("Failed to fetch token secret reference: %w", err)
 	}
-	dopplerToken := tokenSecret.Data[dopplerSecret.Spec.TokenSecretRef.Key]
+	dopplerToken := tokenSecret.Data[kubeSecretServiceTokenKey]
 	if dopplerToken == nil {
-		return "", fmt.Errorf("Could not find secret key %s.%s", dopplerSecret.Spec.TokenSecretRef.Name, dopplerSecret.Spec.TokenSecretRef.Key)
+		return "", fmt.Errorf("Could not find secret key %s.%s", dopplerSecret.Spec.TokenSecretRef.Name, kubeSecretServiceTokenKey)
 	}
 	return string(dopplerToken), nil
 }

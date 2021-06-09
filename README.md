@@ -38,7 +38,7 @@ You can verify that the operator is running successfully in your cluster with `.
 
 A `DopplerSecret` is a custom Kubernetes resource with references to two secrets:
 
-- A Kubernetes secret where your Doppler Service Token is stored (AKA "Doppler Token Secret"). This token will be used to fetch secrets from your Doppler config.
+- A Kubernetes secret where your Doppler Service Token is stored (AKA "Doppler Token Secret"). This token will be used to fetch secrets from your Doppler config. The operator will be looking for the token in the `serviceToken` field of this secret.
 - A Kubernetes secret where your synced Doppler secrets will be stored (AKA "Managed Secret"). This secret will be created by the operator if it does not already exist.
 
 > Note: While these resources can be created in any namespace, it is recommended that you create your Doppler Token Secret and DopplerSecret inside the `doppler-operator-system` namespace to prevent unauthorized access. The managed secret should be namespaced with the deployments which will use the secret.
@@ -46,13 +46,13 @@ A `DopplerSecret` is a custom Kubernetes resource with references to two secrets
 Generate a Doppler Service Token and use it in this command to create your Doppler token secret:
 
 ```bash
-kubectl create secret generic doppler-token-secret -n doppler-operator-system --from-literal=dopplerToken=dp.st.dev.XXXX
+kubectl create secret generic doppler-token-secret -n doppler-operator-system --from-literal=serviceToken=dp.st.dev.XXXX
 ```
 
 If you have the Doppler CLI installed, you can generate a Doppler Service Token from the CLI and create the Doppler token secret in one step:
 
 ```bash
-kubectl create secret generic doppler-token-secret -n doppler-operator-system --from-literal=dopplerToken=$(doppler configs tokens create doppler-kubernetes-operator --plain)
+kubectl create secret generic doppler-token-secret -n doppler-operator-system --from-literal=serviceToken=$(doppler configs tokens create doppler-kubernetes-operator --plain)
 ```
 
 Next, we'll create a `DopplerSecret` that references your Doppler token secret and defines the location of the managed secret.
@@ -61,16 +61,14 @@ Next, we'll create a `DopplerSecret` that references your Doppler token secret a
 apiVersion: secrets.doppler.com/v1alpha1
 kind: DopplerSecret
 metadata:
-  name: dopplersecret-test # DopplerSecret resource name
-  namespace: doppler-operator-system # The Doppler operator namespace (recommended)
+  name: dopplersecret-test # DopplerSecret Name
+  namespace: doppler-operator-system
 spec:
-  # Omitted secret reference namespaces will default to match the namespace of the DopplerSecret
-  tokenSecretRef: # Reference to Doppler Token Secret
+  tokenSecret: # Kubernetes service token secret (namespace defaults to doppler-operator-system)
     name: doppler-token-secret
-    key: dopplerToken
-  managedSecretRef: # Reference to Managed Secret (will be created automatically if does not exist)
+  managedSecret: # Kubernetes managed secret (will be created if does not exist)
     name: doppler-test-secret
-    namespace: default
+    namespace: default # Should match the namespace of deployments that will use the secret
 ```
 
 If you're following along with these example names, you can apply this sample directly:

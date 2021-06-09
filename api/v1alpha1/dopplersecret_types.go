@@ -33,19 +33,15 @@ type SecretReference struct {
 	// Namespace of the resource being referred to. Ignored if not cluster scoped
 	// +optional
 	Namespace string `json:"namespace,omitempty"`
-
-	// The key within the Secret resource, if required.
-	// +optional
-	Key string `json:"key,omitempty"`
 }
 
 // DopplerSecretSpec defines the desired state of DopplerSecret
 type DopplerSecretSpec struct {
-	// The reference to a Kubernetes secret containing the Doppler service token
-	TokenSecretRef SecretReference `json:"tokenSecretRef,omitempty"`
+	// The Kubernetes secret containing the Doppler service token
+	TokenSecretRef SecretReference `json:"tokenSecret,omitempty"`
 
-	// The reference to a Kubernetes secret where the operator will store and sync the fetched secrets
-	ManagedSecretRef SecretReference `json:"managedSecretRef,omitempty"`
+	// The Kubernetes secret where the operator will store and sync the fetched secrets
+	ManagedSecretRef SecretReference `json:"managedSecret,omitempty"`
 
 	// The Doppler API host
 	// +kubebuilder:default="https://api.doppler.com"
