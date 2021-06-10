@@ -31,9 +31,22 @@ jobs:
         uses: docker/build-push-action@v2
         with:
           push: true
-          tags: dopplerhq/kubernetes-operator:latest
+          tags: |
+            dopplerhq/kubernetes-operator:${{ steps.extract.outputs.version }}
+            dopplerhq/kubernetes-operator:latest
           build-args: |
             CONTROLLER_VERSION=${{ steps.extract.outputs.version }}
 
       - name: Image digest
         run: echo ${{ steps.docker_build.outputs.digest }}
+
+      - uses: actions/setup-go@v2
+
+      - name: Generate Recommended YAML
+        run: make dist
+
+      - uses: actions/upload-artifact@master
+        if: success()
+        with:
+          name: YAML Artifacts
+          path: ./dist
