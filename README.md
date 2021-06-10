@@ -19,10 +19,10 @@ Kubernetes Secrets are, by default, stored as unencrypted base64-encoded strings
 
 ## Step 1: Deploy the Operator
 
-Deploy the operator by running:
+Deploy the operator by applying the latest installation YAML
 
 ```bash
-make deploy
+kubectl apply -f <(curl -L https://github.com/DopplerHQ/kubernetes-operator/releases/latest/download/recommended.yaml)
 ```
 
 This will use your locally-configured `kubectl` to:
