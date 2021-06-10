@@ -19,10 +19,10 @@ Kubernetes Secrets are, by default, stored as unencrypted base64-encoded strings
 
 ## Step 1: Deploy the Operator
 
-Deploy the operator by running:
+Deploy the operator by applying the latest installation YAML:
 
 ```bash
-make deploy
+kubectl apply -f <(curl -L https://github.com/DopplerHQ/kubernetes-operator/releases/latest/download/recommended.yaml)
 ```
 
 This will use your locally-configured `kubectl` to:
@@ -227,10 +227,10 @@ The `DopplerSecret` resource manages the managed Kubernetes secret but does not 
 
 To uninstall the operator, first delete any `DopplerSecret` resources and any referenced Kubernetes secrets that are no longer needed.
 
-Then, run the following command to delete all of the resources created during the initial `make deploy`:
+Then, run the following command to delete all of the resources created during the initial installation:
 
 ```bash
-make undeploy
+kubectl delete -f <(curl -L https://github.com/DopplerHQ/kubernetes-operator/releases/latest/download/recommended.yaml)
 ```
 
 ## Development
