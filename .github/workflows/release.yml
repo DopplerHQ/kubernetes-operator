@@ -1,11 +1,11 @@
-name: Publish to DockerHub
+name: Release
 on:
   push:
     tags:
       - 'v*'
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -31,9 +31,23 @@ jobs:
         uses: docker/build-push-action@v2
         with:
           push: true
-          tags: dopplerhq/kubernetes-operator:latest
+          tags: |
+            dopplerhq/kubernetes-operator:${{ steps.extract.outputs.version }}
+            dopplerhq/kubernetes-operator:latest
           build-args: |
             CONTROLLER_VERSION=${{ steps.extract.outputs.version }}
 
       - name: Image digest
         run: echo ${{ steps.docker_build.outputs.digest }}
+
+      - uses: actions/setup-go@v2
+
+      - name: Generate Recommended YAML
+        run: make dist
+
+      - name: Upload Recommended YAML
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: dist/recommended.yaml
+          tag: ${{ github.ref }}
