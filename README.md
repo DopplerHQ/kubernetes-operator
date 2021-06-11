@@ -171,8 +171,8 @@ kubectl rollout status -w deployment/doppler-test-deployment-envfrom
 
 Once the Deployment has completed, you can view the logs of the test container:
 
-```sh
-kubectl logs -lapp=doppler-test
+```bash
+kubectl logs -lapp=doppler-test --tail=-1
 ```
 
 Setup is complete! To test the sync behavior, modify a secret in the Doppler dashboard and wait 60 seconds. Run the logs command again (or use the `watch` command) to see the pods automatically restart with the new secret data.
@@ -226,6 +226,11 @@ The `DopplerSecret` resource manages the managed Kubernetes secret but does not 
 ## Uninstalling
 
 To uninstall the operator, first delete any `DopplerSecret` resources and any referenced Kubernetes secrets that are no longer needed.
+
+```bash
+kubectl delete dopplersecrets --all --all-namespaces
+kubectl delete secret doppler-token-secret -n doppler-operator-system
+```
 
 Then, run the following command to delete all of the resources created during the initial installation:
 
