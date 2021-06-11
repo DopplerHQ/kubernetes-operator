@@ -79,7 +79,7 @@ kubectl apply -f config/samples/secrets_v1alpha1_dopplersecret.yaml
 
 Check that the associated Kubernetes secret has been created:
 
-```sh
+```bash
 # List all Kubernetes secrets created by the Doppler controller
 kubectl describe secrets --selector=secrets.doppler.com/subtype=dopplerSecret
 ```
@@ -164,7 +164,7 @@ Complete examples of these different deployment configurations can be found belo
 
 If you've named your managed Kubernetes secret `doppler-test-secret` in the previous step, you can apply any of these examples directly:
 
-```sh
+```bash
 kubectl apply -f config/samples/deployment-envfrom.yaml
 kubectl rollout status -w deployment/doppler-test-deployment-envfrom
 ```
