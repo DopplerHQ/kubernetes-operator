@@ -80,11 +80,11 @@ kubectl apply -f config/samples/secrets_v1alpha1_dopplersecret.yaml
 Check that the associated Kubernetes secret has been created:
 
 ```bash
-# List all Kubernetes secrets created by the Doppler controller
+# List all Kubernetes secrets created by the Doppler operator
 kubectl describe secrets --selector=secrets.doppler.com/subtype=dopplerSecret
 ```
 
-The controller continuously watches for secret updates from Doppler and when detected, automatically and instantly updates the associated secret.
+The operator continuously watches for secret updates from Doppler and when detected, automatically and instantly updates the associated secret.
 
 Next, we'll cover how to configure a deployment to use the Kubernetes secret and enable auto-reloading for Deployments.
 
