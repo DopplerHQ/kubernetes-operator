@@ -21,7 +21,13 @@ spec:
       containers:
         - name: doppler-test
           image: alpine
-          command: ['/bin/sh', '-c', 'apk add --no-cache tini > /dev/null 2>&1 && ls /etc/secrets | grep -v KUBERNETES_&& tini -s tail -f /dev/null'] # List all non-Kubernetes secret files
+          command: # ['/bin/sh', '-c', 'apk add --no-cache tini > /dev/null 2>&1 && ls /etc/secrets | grep -v KUBERNETES_&& tini -s tail -f /dev/null'] # List all non-Kubernetes secret files
+            - /bin/sh
+            - -c
+            - apk add --no-cache tini > /dev/null 2>&1 &&
+              echo "### This is a simple deployment running with these mounted secret files:" &&
+              (for f in $(find /etc/secrets -type f); do echo $f && cat $f && echo ""; done) &&
+              tini -s tail -f /dev/null
           imagePullPolicy: Always
           volumeMounts:
             - name: secret-volume

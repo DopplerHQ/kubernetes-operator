@@ -17,14 +17,21 @@ spec:
       containers:
         - name: doppler-test
           image: alpine
-          command: ['/bin/sh', '-c', 'apk add --no-cache tini > /dev/null 2>&1 && printenv | grep -v KUBERNETES_ && tini -s tail -f /dev/null'] # Print all non-Kubernetes environment variables
+          command:
+            - /bin/sh
+            - -c
+            # Print all non-Kubernetes environment variables
+            - apk add --no-cache tini > /dev/null 2>&1 &&
+              echo "### This is a simple deployment running with this env:" &&
+              printenv | grep -v KUBERNETES_ &&
+              tini -s tail -f /dev/null
           imagePullPolicy: Always
           env:
-            - name: MY_APP_SECRET # The name of the environment variable exposed in the container
+            - name: DOPPLER_CONFIG # The name of the environment variable exposed in the container
               valueFrom:
                 secretKeyRef:
                   name: doppler-test-secret # Kubernetes secret name
-                  key: MY_APP_SECRET # The name of the key in the Kubernetes secret
+                  key: DOPPLER_CONFIG # The name of the key in the Kubernetes secret
           resources:
             requests:
               memory: '250Mi'
