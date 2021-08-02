@@ -33,6 +33,11 @@ spec:
         name: manager
         securityContext:
           allowPrivilegeEscalation: false
+          privileged: false
+          runAsNonRoot: true
+          capabilities:
+            drop:
+              - NET_RAW
         livenessProbe:
           httpGet:
             path: /healthz
