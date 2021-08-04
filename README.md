@@ -22,7 +22,7 @@ Kubernetes Secrets are, by default, stored as unencrypted base64-encoded strings
 Deploy the operator by applying the latest installation YAML:
 
 ```bash
-kubectl apply -f <(curl -L https://github.com/DopplerHQ/kubernetes-operator/releases/latest/download/recommended.yaml)
+kubectl apply -f https://github.com/DopplerHQ/kubernetes-operator/releases/latest/download/recommended.yaml
 ```
 
 This will use your locally-configured `kubectl` to:
@@ -235,7 +235,7 @@ kubectl delete secret doppler-token-secret -n doppler-operator-system
 Then, run the following command to delete all of the resources created during the initial installation:
 
 ```bash
-kubectl delete -f <(curl -L https://github.com/DopplerHQ/kubernetes-operator/releases/latest/download/recommended.yaml)
+kubectl delete -f https://github.com/DopplerHQ/kubernetes-operator/releases/latest/download/recommended.yaml
 ```
 
 ## Development
