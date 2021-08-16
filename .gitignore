@@ -23,3 +23,8 @@ testbin/*
 *.swp
 *.swo
 *~
+
+# outputs
+/dist/
+/charts/
+/*.tgz

@@ -42,8 +42,8 @@ jobs:
 
       - uses: actions/setup-go@v2
 
-      - name: Generate Recommended YAML
-        run: make dist
+      - name: Generate Helm Chart and Recommended YAML
+        run: make dist charts
         env:
           VERSION: ${{ steps.extract.outputs.version }}
 
@@ -53,3 +53,8 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: dist/recommended.yaml
           tag: ${{ github.ref }}
+
+      - name: Publish Helm Chart
+        run: ./hack/helm/deploy-pages.sh ./doppler-kubernetes-operator*.tgz
+        env:
+          PRIVATE_KEY: ${{ secrets.CHARTS_DEPLOY_PRIVATE_KEY }}

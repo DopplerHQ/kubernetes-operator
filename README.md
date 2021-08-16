@@ -19,13 +19,26 @@ Kubernetes Secrets are, by default, stored as unencrypted base64-encoded strings
 
 ## Step 1: Deploy the Operator
 
-Deploy the operator by applying the latest installation YAML:
+### Using Helm
+
+You can install the latest Helm chart with:
+
+```bash
+helm repo add doppler https://helm.doppler.com
+helm install --generate-name doppler/doppler-kubernetes-operator
+```
+
+Updates can be performed with `helm upgrade`.
+
+### Using `kubectl`
+
+You can also deploy the operator by applying the latest installation YAML directly:
 
 ```bash
 kubectl apply -f https://github.com/DopplerHQ/kubernetes-operator/releases/latest/download/recommended.yaml
 ```
 
-This will use your locally-configured `kubectl` to:
+Regardless of the installation method, this will use your locally-configured `kubectl` to:
 
 - Create a `doppler-operator-system` namespace
 - Create the resource definition for a `DopplerSecret`
@@ -232,7 +245,7 @@ kubectl delete dopplersecrets --all --all-namespaces
 kubectl delete secret doppler-token-secret -n doppler-operator-system
 ```
 
-Then, run the following command to delete all of the resources created during the initial installation:
+If you installed the operator with Helm, you can use `helm uninstall` to remove the installation resources. Otherwise, run the following command:
 
 ```bash
 kubectl delete -f https://github.com/DopplerHQ/kubernetes-operator/releases/latest/download/recommended.yaml
