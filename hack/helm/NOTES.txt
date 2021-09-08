@@ -1,0 +1,1 @@
+To configure the Doppler operator, see https://github.com/DopplerHQ/kubernetes-operator

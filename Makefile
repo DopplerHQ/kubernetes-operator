@@ -121,6 +121,17 @@ dist: manifests kustomize
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default > dist/recommended.yaml
 
+CHART_DIR = charts/doppler-kubernetes-operator
+charts: manifests kustomize helm-tool yq dist
+	mkdir -p $(CHART_DIR)/crds
+	mkdir -p $(CHART_DIR)/templates
+	$(YQ) e 'select(.kind == "CustomResourceDefinition")' dist/recommended.yaml > $(CHART_DIR)/crds/all.yaml
+	$(YQ) e 'select(.kind != "CustomResourceDefinition")' dist/recommended.yaml > $(CHART_DIR)/templates/all.yaml
+	cp hack/helm/Chart.yaml $(CHART_DIR)/
+	cp hack/helm/NOTES.txt $(CHART_DIR)/templates/
+	touch $(CHART_DIR)/values.yaml
+	helm package $(CHART_DIR) --version $(VERSION)
+
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default | kubectl apply -f -
@@ -136,6 +147,10 @@ controller-gen: ## Download controller-gen locally if necessary.
 KUSTOMIZE = $(shell pwd)/bin/kustomize
 kustomize: ## Download kustomize locally if necessary.
 	$(call go-get-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v3@v3.8.7)
+
+YQ = $(shell pwd)/bin/yq
+yq: ## Download yq locally if necessary.
+	$(call go-get-tool,$(YQ),github.com/mikefarah/yq/v4)
 
 # go-get-tool will 'go get' any package $2 and install it to $1.
 PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
@@ -181,6 +196,15 @@ ifeq (,$(shell which opm 2>/dev/null))
 else
 OPM = $(shell which opm)
 endif
+endif
+
+.PHONY: helm-tool
+helm-tool:
+ifeq (,$(shell which helm 2>/dev/null))
+	@{ \
+	set -e ;\
+	curl --tlsv1.2 --proto "=https" https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | sh
+	}
 endif
 
 # A comma-separated list of bundle images (e.g. make catalog-build BUNDLE_IMGS=example.com/operator-bundle:v0.1.0,example.com/operator-bundle:v0.2.0).
