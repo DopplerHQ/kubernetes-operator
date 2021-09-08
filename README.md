@@ -1,4 +1,4 @@
-# Doppler Kubernetes Operator (Prerelease)
+# Doppler Kubernetes Operator
 
 Automatically sync secrets from Doppler to Kubernetes and auto-reload deployments when secrets change.
 
