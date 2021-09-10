@@ -190,6 +190,10 @@ kubectl logs -lapp=doppler-test --tail=-1
 
 Setup is complete! To test the sync behavior, modify a secret in the Doppler dashboard and wait 60 seconds. Run the logs command again (or use the `watch` command) to see the pods automatically restart with the new secret data.
 
+## Advanced Features
+
+By default, the operator syncs secret values as they are in Doppler to an [`Opaque` Kubernetes secret](https://kubernetes.io/docs/concepts/configuration/secret/) as Key / Value pairs. In some cases, the value stored in Doppler is not the format required for your Kubernetes deployment. For example, Base64 encoded `.p12` key file that needs to be decoded for mounting in a container in its original binary format. You can use [processors](docs/processors.md) to modify this behavior.
+
 ## Failure Strategy and Troubleshooting
 
 ### Inspecting Status
