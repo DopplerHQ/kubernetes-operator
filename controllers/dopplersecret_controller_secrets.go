@@ -18,6 +18,8 @@ package controllers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
@@ -28,15 +30,17 @@ import (
 	secretsv1alpha1 "github.com/DopplerHQ/kubernetes-operator/api/v1alpha1"
 	"github.com/DopplerHQ/kubernetes-operator/pkg/api"
 	"github.com/DopplerHQ/kubernetes-operator/pkg/models"
+	procs "github.com/DopplerHQ/kubernetes-operator/pkg/processors"
 )
 
 const (
-	kubeSecretVersionAnnotation      = "secrets.doppler.com/version"
-	kubeSecretDopplerSecretLabel     = "dopplerSecret"
-	kubeSecretSubtypeLabel           = "subtype"
-	kubeSecretSubtypeLabelValue      = "dopplerSecret"
-	kubeSecretDopplerSecretNameLabel = "dopplerSecretName"
-	kubeSecretServiceTokenKey        = "serviceToken"
+	kubeSecretVersionAnnotation           = "secrets.doppler.com/version"
+	kubeSecretProcessorsVersionAnnotation = "secrets.doppler.com/processor-version"
+	kubeSecretDopplerSecretLabel          = "dopplerSecret"
+	kubeSecretSubtypeLabel                = "subtype"
+	kubeSecretSubtypeLabelValue           = "dopplerSecret"
+	kubeSecretDopplerSecretNameLabel      = "dopplerSecretName"
+	kubeSecretServiceTokenKey             = "serviceToken"
 )
 
 // Generates an APIContext from a DopplerSecret
@@ -93,35 +97,72 @@ func (r *DopplerSecretReconciler) GetDopplerToken(ctx context.Context, dopplerSe
 }
 
 // Generate Kube secret data from a Doppler API secrets result
-func GetKubeSecretData(secretsResult models.SecretsResult) map[string][]byte {
+func GetKubeSecretData(secretsResult models.SecretsResult, processors secretsv1alpha1.SecretProcessors) (map[string][]byte, error) {
 	kubeSecretData := map[string][]byte{}
 	for _, secret := range secretsResult.Secrets {
-		kubeSecretData[secret.Name] = []byte(secret.Value)
+		processor := processors[secret.Name]
+		if processor == nil {
+			processor = &secretsv1alpha1.DefaultProcessor
+		}
+		processorFunc := procs.All[processor.Type]
+		if processorFunc == nil {
+			return nil, fmt.Errorf("Failed to process data with unknown processor: %v", processor.Type)
+		}
+		data, err := processorFunc(secret.Value)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to process data: %w", err)
+		}
+		kubeSecretData[secret.Name] = data
 	}
-	return kubeSecretData
+	return kubeSecretData, nil
 }
 
 // Generate Kube annotations from a Doppler API secrets result
-func GetKubeSecretAnnotations(secretsResult models.SecretsResult) map[string]string {
-	return map[string]string{
+func GetKubeSecretAnnotations(secretsResult models.SecretsResult, processorsVersion string) map[string]string {
+	annotations := map[string]string{
 		kubeSecretVersionAnnotation:          secretsResult.ETag,
 		"secrets.doppler.com/dashboard-link": GetDashboardLink(secretsResult.Secrets),
 	}
+
+	if len(processorsVersion) > 0 {
+		annotations[kubeSecretProcessorsVersionAnnotation] = processorsVersion
+	}
+	return annotations
+}
+
+// Generate the version of given processors using a SHA256 hash
+func GetProcessorsVersion(processors secretsv1alpha1.SecretProcessors) (string, error) {
+	if len(processors) == 0 {
+		return "", nil
+	}
+	processorsJson, err := json.Marshal(processors)
+	if err != nil {
+		return "", fmt.Errorf("Failed to marshal processors: %w", err)
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(processorsJson)), nil
 }
 
 // Create a managed Kubernetes secret
 func (r *DopplerSecretReconciler) CreateManagedSecret(ctx context.Context, dopplerSecret secretsv1alpha1.DopplerSecret, secretsResult models.SecretsResult) error {
+	secretData, dataErr := GetKubeSecretData(secretsResult, dopplerSecret.Spec.Processors)
+	if dataErr != nil {
+		return fmt.Errorf("Failed to build Kubernetes secret data: %w", dataErr)
+	}
+	processorsVersion, versErr := GetProcessorsVersion(dopplerSecret.Spec.Processors)
+	if versErr != nil {
+		return fmt.Errorf("Failed to compute processors version: %w", versErr)
+	}
 	newKubeSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        dopplerSecret.Spec.ManagedSecretRef.Name,
 			Namespace:   dopplerSecret.Spec.ManagedSecretRef.Namespace,
-			Annotations: GetKubeSecretAnnotations(secretsResult),
+			Annotations: GetKubeSecretAnnotations(secretsResult, processorsVersion),
 			Labels: map[string]string{
 				"secrets.doppler.com/subtype": "dopplerSecret",
 			},
 		},
 		Type: "Opaque",
-		Data: GetKubeSecretData(secretsResult),
+		Data: secretData,
 	}
 	err := r.Client.Create(ctx, newKubeSecret)
 	if err != nil {
@@ -133,8 +174,16 @@ func (r *DopplerSecretReconciler) CreateManagedSecret(ctx context.Context, doppl
 
 // Update a managed Kubernetes secret
 func (r *DopplerSecretReconciler) UpdateManagedSecret(ctx context.Context, secret corev1.Secret, dopplerSecret secretsv1alpha1.DopplerSecret, secretsResult models.SecretsResult) error {
-	secret.Data = GetKubeSecretData(secretsResult)
-	secret.ObjectMeta.Annotations = GetKubeSecretAnnotations(secretsResult)
+	secretData, dataErr := GetKubeSecretData(secretsResult, dopplerSecret.Spec.Processors)
+	if dataErr != nil {
+		return fmt.Errorf("Failed to build Kubernetes secret data: %w", dataErr)
+	}
+	processorsVersion, versErr := GetProcessorsVersion(dopplerSecret.Spec.Processors)
+	if versErr != nil {
+		return fmt.Errorf("Failed to compute processors version: %w", versErr)
+	}
+	secret.Data = secretData
+	secret.ObjectMeta.Annotations = GetKubeSecretAnnotations(secretsResult, processorsVersion)
 	err := r.Client.Update(ctx, &secret)
 	if err != nil {
 		return fmt.Errorf("Failed to update Kubernetes secret: %w", err)
@@ -163,12 +212,28 @@ func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecre
 		return fmt.Errorf("Failed to fetch managed secret reference: %w", err)
 	}
 
+	currentProcessorsVersion, versErr := GetProcessorsVersion(dopplerSecret.Spec.Processors)
+	if versErr != nil {
+		return fmt.Errorf("Failed to compute processors version: %w", versErr)
+	}
 	log.Info("Fetching Doppler secrets")
 	secretVersion := ""
+	processorsVersion := ""
 	if existingKubeSecret != nil {
 		secretVersion = existingKubeSecret.Annotations[kubeSecretVersionAnnotation]
+		processorsVersion = existingKubeSecret.Annotations[kubeSecretProcessorsVersionAnnotation]
 	}
-	secretsResult, apiErr := api.GetSecrets(GetAPIContext(dopplerSecret, dopplerToken), secretVersion)
+
+	processorsVersionChanged := currentProcessorsVersion != processorsVersion
+	requestedSecretVersion := secretVersion
+
+	if processorsVersionChanged {
+		log.Info("[/] Processors changed, reloading secrets.")
+		// If processors have changed, we need to send an empty secret version to reload the secrets.
+		requestedSecretVersion = ""
+	}
+
+	secretsResult, apiErr := api.GetSecrets(GetAPIContext(dopplerSecret, dopplerToken), requestedSecretVersion)
 	if apiErr != nil {
 		return apiErr
 	}
@@ -176,7 +241,8 @@ func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecre
 		log.Info("[-] Doppler secrets not modified.")
 		return nil
 	}
-	log.Info("[/] Secrets have been modified", "oldVersion", secretVersion, "newVersion", secretsResult.ETag)
+
+	log.Info("[/] Secrets have been modified", "oldVersion", secretVersion, "newVersion", secretsResult.ETag, "processorsChanged", processorsVersionChanged)
 
 	if existingKubeSecret == nil {
 		return r.CreateManagedSecret(ctx, dopplerSecret, *secretsResult)

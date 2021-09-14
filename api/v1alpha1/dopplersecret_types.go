@@ -35,6 +35,16 @@ type SecretReference struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
+type SecretProcessor struct {
+	// The type of process to be performed, either "plain" or "base64"
+	// +kubebuilder:validation:Enum=plain;base64
+	Type string `json:"type"`
+}
+
+type SecretProcessors map[string]*SecretProcessor
+
+var DefaultProcessor = SecretProcessor{Type: "plain"}
+
 // DopplerSecretSpec defines the desired state of DopplerSecret
 type DopplerSecretSpec struct {
 	// The Kubernetes secret containing the Doppler service token
@@ -42,6 +52,10 @@ type DopplerSecretSpec struct {
 
 	// The Kubernetes secret where the operator will store and sync the fetched secrets
 	ManagedSecretRef SecretReference `json:"managedSecret,omitempty"`
+
+	// A list of processors to transform the data during ingestion
+	// +kubebuilder:default={}
+	Processors SecretProcessors `json:"processors,omitempty"`
 
 	// The Doppler API host
 	// +kubebuilder:default="https://api.doppler.com"

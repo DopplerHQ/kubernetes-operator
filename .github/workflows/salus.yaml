@@ -11,6 +11,8 @@ jobs:
     name: Salus Security Scan
     steps:
     - uses: actions/checkout@v2
+    - name: Inject nosec into generated files
+      run: ./hack/inject-nosec.sh
     - name: Salus Scan
       id: salus_scan
       uses: federacy/scan-action@0.1.2
