@@ -238,7 +238,7 @@ The `DopplerSecret` resource manages the managed Kubernetes secret but does not 
 ### Included Tools
 
 - [`tools/get-secret.sh`](tools/get-secret.sh) - fetch and decode a Kubernetes secret
-- [`tools/operator-logs.sh`](tools/operator-logs) - wait for the operator deployment to roll out, then tail the logs
+- [`tools/operator-logs.sh`](tools/operator-logs.sh) - wait for the operator deployment to roll out, then tail the logs
 
 ## Uninstalling
 
