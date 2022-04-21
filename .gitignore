@@ -28,3 +28,6 @@ testbin/*
 /dist/
 /charts/
 /*.tgz
+
+# other
+.DS_Store
