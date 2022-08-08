@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -53,6 +54,19 @@ const (
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.8.3/pkg/reconcile
 func (r *DopplerSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Log.WithValues("dopplersecret", req.NamespacedName)
+
+	ownNamespace, namespaceErr := GetOwnNamespace()
+	if namespaceErr != nil {
+		log.Error(namespaceErr, "Unable to load current namespace")
+		return ctrl.Result{
+			RequeueAfter: defaultRequeueDuration,
+		}, nil
+	}
+
+	if ownNamespace != req.Namespace {
+		log.Error(fmt.Errorf("cannot reconcile doppler secret (%v) in a namespace different from the operator (%v)", req.NamespacedName, ownNamespace), "")
+		return ctrl.Result{}, nil
+	}
 
 	log.Info("Reconciling dopplersecret")
 

@@ -100,7 +100,7 @@ build: generate fmt vet ## Build manager binary.
 	go build ${GO_BUILD_VERSION_FLAGS} -o bin/manager main.go
 
 run: manifests generate fmt vet ## Run a controller from your host. Does not use VERSION flags.
-	go run ./main.go
+	POD_NAMESPACE=doppler-operator-system go run ./main.go
 
 docker-build: test ## Build docker image with the manager.
 	docker build --build-arg CONTROLLER_VERSION=${VERSION} -t ${IMG} .
