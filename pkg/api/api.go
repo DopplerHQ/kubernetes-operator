@@ -34,6 +34,11 @@ type ErrorResponse struct {
 	Success  bool
 }
 
+type QueryParam struct {
+	Key   string
+	Value string
+}
+
 func (e *APIError) Error() string {
 	message := fmt.Sprintf("Doppler Error: %s", e.Message)
 	if underlyingError := e.Err; underlyingError != nil {
@@ -46,12 +51,17 @@ func isSuccess(statusCode int) bool {
 	return (statusCode >= 200 && statusCode <= 299) || (statusCode >= 300 && statusCode <= 399)
 }
 
-func GetRequest(context APIContext, path string, headers map[string]string) (*APIResponse, *APIError) {
+func GetRequest(context APIContext, path string, headers map[string]string, params []QueryParam) (*APIResponse, *APIError) {
 	url := fmt.Sprintf("%s%s", context.Host, path)
 	req, err := http.NewRequest("GET", url, nil)
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
+	query := req.URL.Query()
+	for _, param := range params {
+		query.Add(param.Key, param.Value)
+	}
+	req.URL.RawQuery = query.Encode()
 	if err != nil {
 		return nil, &APIError{Err: err, Message: "Unable to form request"}
 	}
@@ -111,13 +121,21 @@ func PerformRequest(context APIContext, req *http.Request) (*APIResponse, *APIEr
 	return response, nil
 }
 
-func GetSecrets(context APIContext, lastETag string) (*models.SecretsResult, *APIError) {
+func GetSecrets(context APIContext, lastETag string, project string, config string) (*models.SecretsResult, *APIError) {
 	headers := map[string]string{}
 	if lastETag != "" {
 		headers["If-None-Match"] = lastETag
 	}
 
-	response, err := GetRequest(context, "/v3/configs/config/secrets/download", headers)
+	params := []QueryParam{}
+	if project != "" {
+		params = append(params, QueryParam{Key: "project", Value: project})
+	}
+	if config != "" {
+		params = append(params, QueryParam{Key: "config", Value: config})
+	}
+
+	response, err := GetRequest(context, "/v3/configs/config/secrets/download", headers, params)
 	if err != nil {
 		return nil, err
 	}
