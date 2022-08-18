@@ -53,6 +53,14 @@ type DopplerSecretSpec struct {
 	// The Kubernetes secret where the operator will store and sync the fetched secrets
 	ManagedSecretRef SecretReference `json:"managedSecret,omitempty"`
 
+	// The Doppler project
+	// +optional
+	Project string `json:"project,omitempty"`
+
+	// The Doppler config
+	// +optional
+	Config string `json:"config,omitempty"`
+
 	// A list of processors to transform the data during ingestion
 	// +kubebuilder:default={}
 	Processors SecretProcessors `json:"processors,omitempty"`

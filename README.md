@@ -30,6 +30,14 @@ helm install --generate-name doppler/doppler-kubernetes-operator
 
 Updates can be performed with `helm upgrade`.
 
+One caveat is that [Helm cannot update custom resource definitions (CRDs)](https://helm.sh/docs/chart_best_practices/custom_resource_definitions/#some-caveats-and-explanations).
+To simplify this, Doppler guarantees that CRDs will remain backwards compatible. CRDs can be updated directly from the Helm chart manifest with:
+
+```bash
+helm pull doppler/doppler-kubernetes-operator --untar
+kubectl apply -f doppler-kubernetes-operator/crds/all.yaml
+```
+
 ### Using `kubectl`
 
 You can also deploy the operator by applying the latest installation YAML directly:
