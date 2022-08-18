@@ -31,16 +31,18 @@ import (
 	"github.com/DopplerHQ/kubernetes-operator/pkg/api"
 	"github.com/DopplerHQ/kubernetes-operator/pkg/models"
 	procs "github.com/DopplerHQ/kubernetes-operator/pkg/processors"
+	"github.com/DopplerHQ/kubernetes-operator/pkg/transformers"
 )
 
 const (
-	kubeSecretVersionAnnotation           = "secrets.doppler.com/version"
-	kubeSecretProcessorsVersionAnnotation = "secrets.doppler.com/processor-version"
-	kubeSecretDopplerSecretLabel          = "dopplerSecret"
-	kubeSecretSubtypeLabel                = "subtype"
-	kubeSecretSubtypeLabelValue           = "dopplerSecret"
-	kubeSecretDopplerSecretNameLabel      = "dopplerSecretName"
-	kubeSecretServiceTokenKey             = "serviceToken"
+	kubeSecretVersionAnnotation                = "secrets.doppler.com/version"
+	kubeSecretProcessorsVersionAnnotation      = "secrets.doppler.com/processor-version"
+	kubeSecretNameTransformerVersionAnnotation = "secrets.doppler.com/name-transformer-version"
+	kubeSecretDopplerSecretLabel               = "dopplerSecret"
+	kubeSecretSubtypeLabel                     = "subtype"
+	kubeSecretSubtypeLabelValue                = "dopplerSecret"
+	kubeSecretDopplerSecretNameLabel           = "dopplerSecretName"
+	kubeSecretServiceTokenKey                  = "serviceToken"
 )
 
 // Generates an APIContext from a DopplerSecret
@@ -97,9 +99,12 @@ func (r *DopplerSecretReconciler) GetDopplerToken(ctx context.Context, dopplerSe
 }
 
 // Generate Kube secret data from a Doppler API secrets result
-func GetKubeSecretData(secretsResult models.SecretsResult, processors secretsv1alpha1.SecretProcessors) (map[string][]byte, error) {
+func GetKubeSecretData(secretsResult models.SecretsResult, processors secretsv1alpha1.SecretProcessors, nameTransformer string) (map[string][]byte, error) {
 	kubeSecretData := map[string][]byte{}
 	for _, secret := range secretsResult.Secrets {
+		secretName := secret.Name
+
+		// Processors
 		processor := processors[secret.Name]
 		if processor == nil {
 			processor = &secretsv1alpha1.DefaultProcessor
@@ -112,13 +117,23 @@ func GetKubeSecretData(secretsResult models.SecretsResult, processors secretsv1a
 		if err != nil {
 			return nil, fmt.Errorf("Failed to process data: %w", err)
 		}
-		kubeSecretData[secret.Name] = data
+
+		// Name Transformer
+		if nameTransformer != "" {
+			selectedNameTransformer := transformers.SecretsNameTransformers[nameTransformer]
+			if selectedNameTransformer == nil {
+				return nil, fmt.Errorf("Failed to apply name transformation with invalid transform : %v. Valid transformers are %s", nameTransformer, transformers.SecretsNameTransformerTypes)
+			}
+			secretName = selectedNameTransformer.TransformerFunc(secret.Name)
+		}
+
+		kubeSecretData[secretName] = data
 	}
 	return kubeSecretData, nil
 }
 
 // Generate Kube annotations from a Doppler API secrets result
-func GetKubeSecretAnnotations(secretsResult models.SecretsResult, processorsVersion string) map[string]string {
+func GetKubeSecretAnnotations(secretsResult models.SecretsResult, processorsVersion string, nameTransformerVersion string) map[string]string {
 	annotations := map[string]string{
 		kubeSecretVersionAnnotation:          secretsResult.ETag,
 		"secrets.doppler.com/dashboard-link": GetDashboardLink(secretsResult.Secrets),
@@ -127,6 +142,11 @@ func GetKubeSecretAnnotations(secretsResult models.SecretsResult, processorsVers
 	if len(processorsVersion) > 0 {
 		annotations[kubeSecretProcessorsVersionAnnotation] = processorsVersion
 	}
+
+	if len(nameTransformerVersion) > 0 {
+		annotations[kubeSecretNameTransformerVersionAnnotation] = nameTransformerVersion
+	}
+
 	return annotations
 }
 
@@ -142,9 +162,17 @@ func GetProcessorsVersion(processors secretsv1alpha1.SecretProcessors) (string, 
 	return fmt.Sprintf("%x", sha256.Sum256(processorsJson)), nil
 }
 
+func GetNameTransformerVersion(nameTransformer string) (string, error) {
+	if nameTransformer == "" {
+		return "", nil
+	}
+
+	return nameTransformer, nil
+}
+
 // Create a managed Kubernetes secret
 func (r *DopplerSecretReconciler) CreateManagedSecret(ctx context.Context, dopplerSecret secretsv1alpha1.DopplerSecret, secretsResult models.SecretsResult) error {
-	secretData, dataErr := GetKubeSecretData(secretsResult, dopplerSecret.Spec.Processors)
+	secretData, dataErr := GetKubeSecretData(secretsResult, dopplerSecret.Spec.Processors, dopplerSecret.Spec.NameTransformer)
 	if dataErr != nil {
 		return fmt.Errorf("Failed to build Kubernetes secret data: %w", dataErr)
 	}
@@ -152,11 +180,15 @@ func (r *DopplerSecretReconciler) CreateManagedSecret(ctx context.Context, doppl
 	if versErr != nil {
 		return fmt.Errorf("Failed to compute processors version: %w", versErr)
 	}
+	nameTransformerVersion, versErr := GetNameTransformerVersion(dopplerSecret.Spec.NameTransformer)
+	if versErr != nil {
+		return fmt.Errorf("Failed to compute name transformer version: %w", versErr)
+	}
 	newKubeSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        dopplerSecret.Spec.ManagedSecretRef.Name,
 			Namespace:   dopplerSecret.Spec.ManagedSecretRef.Namespace,
-			Annotations: GetKubeSecretAnnotations(secretsResult, processorsVersion),
+			Annotations: GetKubeSecretAnnotations(secretsResult, processorsVersion, nameTransformerVersion),
 			Labels: map[string]string{
 				"secrets.doppler.com/subtype": "dopplerSecret",
 			},
@@ -174,16 +206,20 @@ func (r *DopplerSecretReconciler) CreateManagedSecret(ctx context.Context, doppl
 
 // Update a managed Kubernetes secret
 func (r *DopplerSecretReconciler) UpdateManagedSecret(ctx context.Context, secret corev1.Secret, dopplerSecret secretsv1alpha1.DopplerSecret, secretsResult models.SecretsResult) error {
-	secretData, dataErr := GetKubeSecretData(secretsResult, dopplerSecret.Spec.Processors)
+	secretData, dataErr := GetKubeSecretData(secretsResult, dopplerSecret.Spec.Processors, dopplerSecret.Spec.NameTransformer)
 	if dataErr != nil {
 		return fmt.Errorf("Failed to build Kubernetes secret data: %w", dataErr)
 	}
-	processorsVersion, versErr := GetProcessorsVersion(dopplerSecret.Spec.Processors)
-	if versErr != nil {
-		return fmt.Errorf("Failed to compute processors version: %w", versErr)
+	processorsVersion, procsVersErr := GetProcessorsVersion(dopplerSecret.Spec.Processors)
+	if procsVersErr != nil {
+		return fmt.Errorf("Failed to compute processors version: %w", procsVersErr)
+	}
+	nameTransformersVersion, transVersErr := GetNameTransformerVersion(dopplerSecret.Spec.NameTransformer)
+	if transVersErr != nil {
+		return fmt.Errorf("Failed to compute name transformers version: %w", transVersErr)
 	}
 	secret.Data = secretData
-	secret.ObjectMeta.Annotations = GetKubeSecretAnnotations(secretsResult, processorsVersion)
+	secret.ObjectMeta.Annotations = GetKubeSecretAnnotations(secretsResult, processorsVersion, nameTransformersVersion)
 	err := r.Client.Update(ctx, &secret)
 	if err != nil {
 		return fmt.Errorf("Failed to update Kubernetes secret: %w", err)
@@ -216,20 +252,31 @@ func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecre
 	if versErr != nil {
 		return fmt.Errorf("Failed to compute processors version: %w", versErr)
 	}
+
+	currentNameTransformerVersion, versErr := GetNameTransformerVersion(dopplerSecret.Spec.NameTransformer)
+	if versErr != nil {
+		return fmt.Errorf("Failed to compute name transformer version: %w", versErr)
+	}
+
 	log.Info("Fetching Doppler secrets")
 	secretVersion := ""
+
+	// Secret processors
 	processorsVersion := ""
+	nameTransformerVersion := ""
 	if existingKubeSecret != nil {
 		secretVersion = existingKubeSecret.Annotations[kubeSecretVersionAnnotation]
 		processorsVersion = existingKubeSecret.Annotations[kubeSecretProcessorsVersionAnnotation]
+		nameTransformerVersion = existingKubeSecret.Annotations[kubeSecretNameTransformerVersionAnnotation]
 	}
 
 	processorsVersionChanged := currentProcessorsVersion != processorsVersion
+	nameTransformerVersionChanged := currentNameTransformerVersion != nameTransformerVersion
 	requestedSecretVersion := secretVersion
 
-	if processorsVersionChanged {
-		log.Info("[/] Processors changed, reloading secrets.")
-		// If processors have changed, we need to send an empty secret version to reload the secrets.
+	// If processors or name transformer have changed, set requestedSecretVersion to an empty secret version to reload the secrets
+	if processorsVersionChanged || nameTransformerVersionChanged {
+		log.Info("[/] Secret modifiers changed, reloading secrets.", "nameTransformersChanged", nameTransformerVersionChanged, "processorsChanged", processorsVersionChanged)
 		requestedSecretVersion = ""
 	}
 
