@@ -2,7 +2,7 @@
 
 Automatically sync secrets from Doppler to Kubernetes and auto-reload deployments when secrets change.
 
-![Doppler Kubernetes Operator Diagram](docs/diagram.png)
+![Doppler Kubernetes Operator Diagram](docs/diagram.jpg)
 
 ## Overview
 
