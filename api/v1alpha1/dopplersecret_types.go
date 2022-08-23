@@ -73,6 +73,11 @@ type DopplerSecretSpec struct {
 	// +kubebuilder:default=true
 	VerifyTLS bool `json:"verifyTLS,omitempty"`
 
+	// The environment variable compatible secrets name transformer to apply
+	// +kubebuilder:validation:Enum=upper-camel;camel;lower-snake;tf-var;dotnet-env
+	// +optional
+	NameTransformer string `json:"nameTransformer,omitempty"`
+
 	// The number of seconds to wait between resyncs
 	// +kubebuilder:default=60
 	ResyncSeconds int64 `json:"resyncSeconds,omitempty"`

@@ -2,7 +2,7 @@
 
 Automatically sync secrets from Doppler to Kubernetes and auto-reload deployments when secrets change.
 
-![Doppler Kubernetes Operator Diagram](docs/diagram.png)
+![Doppler Kubernetes Operator Diagram](docs/diagram.jpg)
 
 ## Overview
 
@@ -198,7 +198,38 @@ kubectl logs -lapp=doppler-test --tail=-1
 
 Setup is complete! To test the sync behavior, modify a secret in the Doppler dashboard and wait 60 seconds. Run the logs command again (or use the `watch` command) to see the pods automatically restart with the new secret data.
 
-## Advanced Features
+## Name Transformers
+
+Name Transformers enable secret names to transformed from Doppler's `UPPER_SNAKE_CASE` format into any of the following environment variable compatible formats:
+
+| Type        | Default         | Transform      |
+|-------------|-----------------|----------------|
+| camel       | API_KEY         | apiKey         |
+| upper-camel | API_KEY         | ApiKey         |
+| lower-snake | API_KEY         | api-key        |
+| tf-var      | API_KEY         | TF_VAR_api_key |
+| dotnet-env  | SMTP__USER_NAME | Smtp__UserName |
+
+Simply add the `nameTransformer` field with any of the above types:
+
+```yaml
+apiVersion: secrets.doppler.com/v1alpha1
+kind: DopplerSecret
+metadata:
+  name: dopplersecret-test
+  namespace: doppler-operator-system
+spec:
+  tokenSecret:
+    name: doppler-token-secret
+  managedSecret:
+    name: doppler-test-secret
+    namespace: default
+  nameTransformer: dotnet-env
+```
+
+The `nameTransformer` values are also validated prior to admission to prevent transformation failures.
+
+## Custom Value Encoding With Processors
 
 By default, the operator syncs secret values as they are in Doppler to an [`Opaque` Kubernetes secret](https://kubernetes.io/docs/concepts/configuration/secret/) as Key / Value pairs. In some cases, the value stored in Doppler is not the format required for your Kubernetes deployment. For example, Base64 encoded `.p12` key file that needs to be decoded for mounting in a container in its original binary format. You can use [processors](docs/processors.md) to modify this behavior.
 
