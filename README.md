@@ -229,6 +229,57 @@ spec:
 
 The `nameTransformer` values are also validated prior to admission to prevent transformation failures.
 
+## Download Formats
+
+Instead of the standard Key / Value pairs, you can download secrets as a single file in the following formats:
+
+- json
+- dotnet-json
+- env
+- env-no-quotes
+- yaml
+
+When `format` is specified, a single `DOPPLER_SECRETS_FILE` key is set in the created secret with the string contents of the downloaded file.
+
+Simply add the `format` field:
+
+```yaml
+apiVersion: secrets.doppler.com/v1alpha1
+kind: DopplerSecret
+metadata:
+  name: dotnet-webapp-appsettings
+  namespace: doppler-operator-system
+spec:
+  tokenSecret:
+    name: doppler-token-dotnet-webapp
+    namespace: doppler-operator-system
+  managedSecret:
+    name: dotnet-webapp-appsettings
+    namespace: default
+  format: dotnet-json
+```
+
+You can then configure your deployment spec to mount the file at the desired path:
+
+```yaml
+...
+    spec:
+      containers:
+        - name: dotnet-webapp
+          volumeMounts:
+            - name: doppler
+              mountPath: /usr/src/app/secrets 
+              readOnly: true
+      volumes:
+        - name: doppler
+          secret:
+            secretName: dotnet-webapp-appsettings  # Managed secret name
+            optional: false
+            items:
+              - key: DOPPLER_SECRETS_FILE # Hard-coded by Operator when format specified
+                path: appsettings.json # Name or path to file name appended to container mountPath
+```
+
 ## Custom Value Encoding With Processors
 
 By default, the operator syncs secret values as they are in Doppler to an [`Opaque` Kubernetes secret](https://kubernetes.io/docs/concepts/configuration/secret/) as Key / Value pairs. In some cases, the value stored in Doppler is not the format required for your Kubernetes deployment. For example, Base64 encoded `.p12` key file that needs to be decoded for mounting in a container in its original binary format. You can use [processors](docs/processors.md) to modify this behavior.
