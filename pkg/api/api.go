@@ -121,7 +121,7 @@ func PerformRequest(context APIContext, req *http.Request) (*APIResponse, *APIEr
 	return response, nil
 }
 
-func GetSecrets(context APIContext, lastETag string, project string, config string) (*models.SecretsResult, *APIError) {
+func GetSecrets(context APIContext, lastETag string, project string, config string, nameTransformer string) (*models.SecretsResult, *APIError) {
 	headers := map[string]string{}
 	if lastETag != "" {
 		headers["If-None-Match"] = lastETag
@@ -133,6 +133,9 @@ func GetSecrets(context APIContext, lastETag string, project string, config stri
 	}
 	if config != "" {
 		params = append(params, QueryParam{Key: "config", Value: config})
+	}
+	if nameTransformer != "" {
+		params = append(params, QueryParam{Key: "name_transformer", Value: nameTransformer})
 	}
 
 	response, err := GetRequest(context, "/v3/configs/config/secrets/download", headers, params)
