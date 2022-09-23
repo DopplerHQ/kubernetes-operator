@@ -6,12 +6,16 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/DopplerHQ/kubernetes-operator/pkg/models"
+
 	"github.com/DopplerHQ/kubernetes-operator/pkg/version"
 )
+
+const secretsDownloadFileKey = "DOPPLER_SECRETS_FILE"
 
 type APIContext struct {
 	Host      string
@@ -121,7 +125,7 @@ func PerformRequest(context APIContext, req *http.Request) (*APIResponse, *APIEr
 	return response, nil
 }
 
-func GetSecrets(context APIContext, lastETag string, project string, config string, nameTransformer string) (*models.SecretsResult, *APIError) {
+func GetSecrets(context APIContext, lastETag string, project string, config string, nameTransformer string, format string) (*models.SecretsResult, *APIError) {
 	headers := map[string]string{}
 	if lastETag != "" {
 		headers["If-None-Match"] = lastETag
@@ -137,14 +141,50 @@ func GetSecrets(context APIContext, lastETag string, project string, config stri
 	if nameTransformer != "" {
 		params = append(params, QueryParam{Key: "name_transformer", Value: nameTransformer})
 	}
+	if format != "" {
+		params = append(params, QueryParam{Key: "format", Value: format})
+	}
 
 	response, err := GetRequest(context, "/v3/configs/config/secrets/download", headers, params)
 	if err != nil {
 		return nil, err
 	}
-	result, modelErr := models.ParseSecrets(response.HTTPResponse.StatusCode, response.Body, response.HTTPResponse.Header.Get("ETag"))
+
+	if response.HTTPResponse.StatusCode == 304 {
+		return &models.SecretsResult{Modified: false, Secrets: nil, ETag: ""}, nil
+	}
+	eTag := response.HTTPResponse.Header.Get("ETag")
+
+	// Format defeats JSON parsing
+	if format != "" {
+		secrets := []models.Secret{{
+			Name:  secretsDownloadFileKey,
+			Value: string(response.Body),
+		}}
+		return &models.SecretsResult{Modified: true, Secrets: secrets, ETag: eTag}, nil
+	}
+
+	result, modelErr := parseSecrets(response.Body, eTag)
 	if modelErr != nil {
 		return nil, &APIError{Err: modelErr, Message: "Unable to parse secrets"}
 	}
 	return result, nil
+}
+
+func parseSecrets(response []byte, eTag string) (*models.SecretsResult, error) {
+	var result map[string]string
+	err := json.Unmarshal(response, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	secrets := make([]models.Secret, 0)
+	for key, value := range result {
+		secret := models.Secret{Name: key, Value: value}
+		secrets = append(secrets, secret)
+	}
+	sort.Slice(secrets, func(i, j int) bool {
+		return secrets[i].Name < secrets[j].Name
+	})
+	return &models.SecretsResult{Modified: true, Secrets: secrets, ETag: eTag}, nil
 }

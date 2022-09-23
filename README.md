@@ -34,6 +34,7 @@ One caveat is that [Helm cannot update custom resource definitions (CRDs)](https
 To simplify this, Doppler guarantees that CRDs will remain backwards compatible. CRDs can be updated directly from the Helm chart manifest with:
 
 ```bash
+helm repo update
 helm pull doppler/doppler-kubernetes-operator --untar
 kubectl apply -f doppler-kubernetes-operator/crds/all.yaml
 ```
@@ -228,6 +229,57 @@ spec:
 ```
 
 The `nameTransformer` values are also validated prior to admission to prevent transformation failures.
+
+## Download Formats
+
+Instead of the standard Key / Value pairs, you can download secrets as a single file in the following formats:
+
+- json
+- dotnet-json
+- env
+- env-no-quotes
+- yaml
+
+When `format` is specified, a single `DOPPLER_SECRETS_FILE` key is set in the created secret with the string contents of the downloaded file.
+
+Simply add the `format` field:
+
+```yaml
+apiVersion: secrets.doppler.com/v1alpha1
+kind: DopplerSecret
+metadata:
+  name: dotnet-webapp-appsettings
+  namespace: doppler-operator-system
+spec:
+  tokenSecret:
+    name: doppler-token-dotnet-webapp
+    namespace: doppler-operator-system
+  managedSecret:
+    name: dotnet-webapp-appsettings
+    namespace: default
+  format: dotnet-json
+```
+
+You can then configure your deployment spec to mount the file at the desired path:
+
+```yaml
+...
+    spec:
+      containers:
+        - name: dotnet-webapp
+          volumeMounts:
+            - name: doppler
+              mountPath: /usr/src/app/secrets 
+              readOnly: true
+      volumes:
+        - name: doppler
+          secret:
+            secretName: dotnet-webapp-appsettings  # Managed secret name
+            optional: false
+            items:
+              - key: DOPPLER_SECRETS_FILE # Hard-coded by Operator when format specified
+                path: appsettings.json # Name or path to file name appended to container mountPath
+```
 
 ## Custom Value Encoding With Processors
 

@@ -78,6 +78,11 @@ type DopplerSecretSpec struct {
 	// +optional
 	NameTransformer string `json:"nameTransformer,omitempty"`
 
+	// Format enables the downloading of secrets as a file
+	// +kubebuilder:validation:Enum=json;dotnet-json;env;yaml;docker
+	// +optional
+	Format string `json:"format,omitempty"`
+
 	// The number of seconds to wait between resyncs
 	// +kubebuilder:default=60
 	ResyncSeconds int64 `json:"resyncSeconds,omitempty"`

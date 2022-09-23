@@ -22,6 +22,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/DopplerHQ/kubernetes-operator/pkg/models"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,13 +31,13 @@ import (
 
 	secretsv1alpha1 "github.com/DopplerHQ/kubernetes-operator/api/v1alpha1"
 	"github.com/DopplerHQ/kubernetes-operator/pkg/api"
-	"github.com/DopplerHQ/kubernetes-operator/pkg/models"
 	procs "github.com/DopplerHQ/kubernetes-operator/pkg/processors"
 )
 
 const (
 	kubeSecretVersionAnnotation           = "secrets.doppler.com/version"
 	kubeSecretProcessorsVersionAnnotation = "secrets.doppler.com/processor-version"
+	kubeSecretFormatVersionAnnotation     = "secrets.doppler.com/format"
 	kubeSecretServiceTokenKey             = "serviceToken"
 )
 
@@ -118,7 +120,7 @@ func GetKubeSecretData(secretsResult models.SecretsResult, processors secretsv1a
 }
 
 // GetKubeSecretAnnotations generates Kube annotations from a Doppler API secrets result
-func GetKubeSecretAnnotations(secretsResult models.SecretsResult, processorsVersion string) map[string]string {
+func GetKubeSecretAnnotations(secretsResult models.SecretsResult, processorsVersion string, format string) map[string]string {
 	annotations := map[string]string{
 		kubeSecretVersionAnnotation:          secretsResult.ETag,
 		"secrets.doppler.com/dashboard-link": GetDashboardLink(secretsResult.Secrets),
@@ -126,6 +128,10 @@ func GetKubeSecretAnnotations(secretsResult models.SecretsResult, processorsVers
 
 	if len(processorsVersion) > 0 {
 		annotations[kubeSecretProcessorsVersionAnnotation] = processorsVersion
+	}
+
+	if len(format) > 0 {
+		annotations[kubeSecretFormatVersionAnnotation] = format
 	}
 
 	return annotations
@@ -157,7 +163,7 @@ func (r *DopplerSecretReconciler) CreateManagedSecret(ctx context.Context, doppl
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        dopplerSecret.Spec.ManagedSecretRef.Name,
 			Namespace:   dopplerSecret.Spec.ManagedSecretRef.Namespace,
-			Annotations: GetKubeSecretAnnotations(secretsResult, processorsVersion),
+			Annotations: GetKubeSecretAnnotations(secretsResult, processorsVersion, dopplerSecret.Spec.Format),
 			Labels: map[string]string{
 				"secrets.doppler.com/subtype": "dopplerSecret",
 			},
@@ -184,7 +190,7 @@ func (r *DopplerSecretReconciler) UpdateManagedSecret(ctx context.Context, secre
 		return fmt.Errorf("Failed to compute processors version: %w", procsVersErr)
 	}
 	secret.Data = secretData
-	secret.ObjectMeta.Annotations = GetKubeSecretAnnotations(secretsResult, processorsVersion)
+	secret.ObjectMeta.Annotations = GetKubeSecretAnnotations(secretsResult, processorsVersion, dopplerSecret.Spec.Format)
 	err := r.Client.Update(ctx, &secret)
 	if err != nil {
 		return fmt.Errorf("Failed to update Kubernetes secret: %w", err)
@@ -223,21 +229,29 @@ func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecre
 
 	// Secret processors
 	processorsVersion := ""
+	formatVersion := ""
 	if existingKubeSecret != nil {
 		secretVersion = existingKubeSecret.Annotations[kubeSecretVersionAnnotation]
 		processorsVersion = existingKubeSecret.Annotations[kubeSecretProcessorsVersionAnnotation]
+		formatVersion = existingKubeSecret.Annotations[kubeSecretFormatVersionAnnotation]
 	}
 
 	processorsVersionChanged := currentProcessorsVersion != processorsVersion
+	formatVersionChanged := dopplerSecret.Spec.Format != formatVersion
 	requestedSecretVersion := secretVersion
 
-	// If processors have changed, set requestedSecretVersion to an empty secret version to reload the secrets
-	if processorsVersionChanged {
-		log.Info("[/] Processor version changed, reloading secrets.", processorsVersionChanged)
+	// - Processors transform secret values so if they've changed, we need to re-fetch the secrets so they can be re-processed.
+	// - The format is computed by the API and it defaults to "json". However, the operator uses the presence of the `format` field
+	//   to determine whether or not to process the JSON as separate k/v pairs or save the whole payload into a single DOPPLER_SECRETS_FILE secret.
+	//   If the format changed, we need to re-fetch secrets so we can redetermine this.
+
+	// If either have changed, set requestedSecretVersion to an empty secret version to reload the secrets.
+	if processorsVersionChanged || formatVersionChanged {
+		log.Info("[/] Processor or format version changed, reloading secrets.", "processorsChanged", processorsVersionChanged, "formatChanged", formatVersionChanged)
 		requestedSecretVersion = ""
 	}
 
-	secretsResult, apiErr := api.GetSecrets(GetAPIContext(dopplerSecret, dopplerToken), requestedSecretVersion, dopplerSecret.Spec.Project, dopplerSecret.Spec.Config, dopplerSecret.Spec.NameTransformer)
+	secretsResult, apiErr := api.GetSecrets(GetAPIContext(dopplerSecret, dopplerToken), requestedSecretVersion, dopplerSecret.Spec.Project, dopplerSecret.Spec.Config, dopplerSecret.Spec.NameTransformer, dopplerSecret.Spec.Format)
 	if apiErr != nil {
 		return apiErr
 	}
