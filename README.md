@@ -34,6 +34,7 @@ One caveat is that [Helm cannot update custom resource definitions (CRDs)](https
 To simplify this, Doppler guarantees that CRDs will remain backwards compatible. CRDs can be updated directly from the Helm chart manifest with:
 
 ```bash
+helm repo update
 helm pull doppler/doppler-kubernetes-operator --untar
 kubectl apply -f doppler-kubernetes-operator/crds/all.yaml
 ```
