@@ -42,6 +42,8 @@ jobs:
         run: echo ${{ steps.docker_build.outputs.digest }}
 
       - uses: actions/setup-go@v2
+        with:
+          go-version: "1.16"
 
       - name: Generate Helm Chart and Recommended YAML
         run: make dist charts
