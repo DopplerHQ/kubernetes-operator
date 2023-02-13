@@ -150,13 +150,18 @@ kustomize: ## Download kustomize locally if necessary.
 
 YQ = $(shell pwd)/bin/yq
 yq: ## Download yq locally if necessary.
+ifeq (,$(wildcard $(YQ)))
 ifeq (,$(shell which yq 2>/dev/null))
 	@{ \
 	set -e ;\
+	echo 'Downloading yq binary...' ;\
 	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
 	curl --tlsv1.2 --proto "=https" -sSLo "$(YQ)" "https://github.com/mikefarah/yq/releases/download/v4.30.8/yq_$${OS}_$${ARCH}" ;\
 	chmod +x $(YQ) ;\
 	}
+else
+YQ = $(shell which yq)
+endif
 endif
 
 # go-get-tool will 'go get' any package $2 and install it to $1.
