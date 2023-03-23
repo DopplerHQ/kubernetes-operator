@@ -17,7 +17,11 @@ The Doppler Kubernetes Operator uses [Kubernetes Secrets](https://kubernetes.io/
 
 Kubernetes Secrets are, by default, stored as unencrypted base64-encoded strings. By default they can be retrieved - as plain text - by anyone with API access, or anyone with access to Kubernetes' underlying data store, etcd. Therefore, Kubernetes recommends enabling [encryption at rest](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/) to secure this data.
 
+Note: GKE and Amazon EKS both have this set by default
+
 ## Step 1: Deploy the Operator
+
+### Make sure to install [Helm](https://helm.sh/docs/intro/install/)
 
 ### Using Helm
 

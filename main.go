@@ -18,6 +18,8 @@ package main
 
 import (
 	"flag"
+	bzap "go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -58,8 +60,18 @@ func main() {
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
+
+	zopt := bzap.WrapCore(func(c zapcore.Core) zapcore.Core {
+		return controllers.NewLoggerCore()
+	})
+
+	var zopts []bzap.Option
+
+	zopts = append(zopts, zopt)
+
 	opts := zap.Options{
-		Development: true,
+		Development: false,
+		ZapOpts:     zopts,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
