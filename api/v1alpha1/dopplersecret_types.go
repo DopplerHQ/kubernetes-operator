@@ -69,6 +69,9 @@ type DopplerSecretSpec struct {
 	// +kubebuilder:default="https://api.doppler.com"
 	Host string `json:"host,omitempty"`
 
+	// The Doppler secret type transferred to the managed secret type
+	Type string `json:"type,omitempty"`
+
 	// Whether or not to verify TLS
 	// +kubebuilder:default=true
 	VerifyTLS bool `json:"verifyTLS,omitempty"`

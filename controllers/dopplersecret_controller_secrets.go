@@ -168,7 +168,7 @@ func (r *DopplerSecretReconciler) CreateManagedSecret(ctx context.Context, doppl
 				"secrets.doppler.com/subtype": "dopplerSecret",
 			},
 		},
-		Type: "Opaque",
+		Type: dopplerSecret.Spec.ManagedSecretRef.Type,
 		Data: secretData,
 	}
 	err := r.Client.Create(ctx, newKubeSecret)
