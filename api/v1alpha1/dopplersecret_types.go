@@ -69,11 +69,11 @@ type DopplerSecretSpec struct {
 	// +kubebuilder:default="https://api.doppler.com"
 	Host string `json:"host,omitempty"`
 
-	// The Doppler secret type transferred to the managed secret type
+	// The Doppler secret type is transferred to the managed secret type
 	// +kubebuilder:validation:Enum=Opaque;kubernetes.io/tls;kubernetes.io/service-account-token;kubernetes.io/dockercfg;kubernetes.io/dockerconfigjson;kubernetes.io/basic-auth;kubernetes.io/ssh-auth;bootstrap.kubernetes.io/token
 	// +kubebuilder:default=Opaque
 	// +optional
-	Type string `json:"type,omitempty"`
+	SecretType string `json:"type,omitempty"`
 
 	// Whether or not to verify TLS
 	// +kubebuilder:default=true
