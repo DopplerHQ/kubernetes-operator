@@ -210,6 +210,7 @@ Name Transformers enable secret names to transformed from Doppler's `UPPER_SNAKE
 | lower-snake | API_KEY         | api-key        |
 | tf-var      | API_KEY         | TF_VAR_api_key |
 | dotnet-env  | SMTP__USER_NAME | Smtp__UserName |
+| tls-var     | TLS_CRT         | tls.crt        |
 
 Simply add the `nameTransformer` field with any of the above types:
 
