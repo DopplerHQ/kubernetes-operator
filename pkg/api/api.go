@@ -185,7 +185,7 @@ func parseSecrets(response []byte, eTag string, nameTransformer string) (*models
 	}
 
 	secrets := make([]models.Secret, 0)
-	if nameTransformer == "tls-var" {
+	if nameTransformer != "tls-var" {
 		for key, value := range result {
 			secret := models.Secret{Name: key, Value: value}
 			secrets = append(secrets, secret)
