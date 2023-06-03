@@ -22,16 +22,16 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/DopplerHQ/kubernetes-operator/pkg/models"
+	"github.com/premiscale/kubernetes-operator/pkg/models"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/DopplerHQ/kubernetes-operator/pkg/api"
-	procs "github.com/DopplerHQ/kubernetes-operator/pkg/processors"
 	secretsv1alpha1 "github.com/premiscale/kubernetes-operator/api/v1alpha1"
+	"github.com/premiscale/kubernetes-operator/pkg/api"
+	procs "github.com/premiscale/kubernetes-operator/pkg/processors"
 )
 
 const (
