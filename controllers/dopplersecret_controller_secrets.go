@@ -29,9 +29,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	secretsv1alpha1 "github.com/DopplerHQ/kubernetes-operator/api/v1alpha1"
 	"github.com/DopplerHQ/kubernetes-operator/pkg/api"
 	procs "github.com/DopplerHQ/kubernetes-operator/pkg/processors"
+	secretsv1alpha1 "github.com/premiscale/kubernetes-operator/tree/configurable-type/api/v1alpha1"
 )
 
 const (
