@@ -1,12 +1,12 @@
-module github.com/DopplerHQ/kubernetes-operator
+module github.com/premiscale/kubernetes-operator
 
 go 1.16
 
 require (
+	github.com/DopplerHQ/kubernetes-operator v1.2.5
 	github.com/go-logr/logr v0.3.0
 	github.com/onsi/ginkgo v1.14.1
 	github.com/onsi/gomega v1.10.2
-	golang.org/x/sys v0.0.0-20220804214406-8e32c043e418 // indirect
 	k8s.io/api v0.20.2
 	k8s.io/apimachinery v0.20.2
 	k8s.io/client-go v0.20.2
