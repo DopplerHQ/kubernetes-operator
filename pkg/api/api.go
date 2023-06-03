@@ -139,7 +139,13 @@ func GetSecrets(context APIContext, lastETag string, project string, config stri
 		params = append(params, QueryParam{Key: "config", Value: config})
 	}
 	if nameTransformer != "" {
-		params = append(params, QueryParam{Key: "name_transformer", Value: nameTransformer})
+		if nameTransformer != "tls-var" {
+			params = append(params, QueryParam{Key: "name_transformer", Value: nameTransformer})
+		} else {
+			// Do a bit of post-processing with a supported transform. The API doesn't yet support this feature.
+			// https://docs.doppler.com/docs/accessing-secrets#name-transformers
+			params = append(params, QueryParam{Key: "name_transformer", Value: "lower-snake"})
+		}
 	}
 	if format != "" {
 		params = append(params, QueryParam{Key: "format", Value: format})
@@ -164,14 +170,14 @@ func GetSecrets(context APIContext, lastETag string, project string, config stri
 		return &models.SecretsResult{Modified: true, Secrets: secrets, ETag: eTag}, nil
 	}
 
-	result, modelErr := parseSecrets(response.Body, eTag)
+	result, modelErr := parseSecrets(response.Body, eTag, nameTransformer)
 	if modelErr != nil {
 		return nil, &APIError{Err: modelErr, Message: "Unable to parse secrets"}
 	}
 	return result, nil
 }
 
-func parseSecrets(response []byte, eTag string) (*models.SecretsResult, error) {
+func parseSecrets(response []byte, eTag string, nameTransformer string) (*models.SecretsResult, error) {
 	var result map[string]string
 	err := json.Unmarshal(response, &result)
 	if err != nil {
@@ -179,9 +185,16 @@ func parseSecrets(response []byte, eTag string) (*models.SecretsResult, error) {
 	}
 
 	secrets := make([]models.Secret, 0)
-	for key, value := range result {
-		secret := models.Secret{Name: key, Value: value}
-		secrets = append(secrets, secret)
+	if nameTransformer == "tls-var" {
+		for key, value := range result {
+			secret := models.Secret{Name: key, Value: value}
+			secrets = append(secrets, secret)
+		}
+	} else {
+		for key, value := range result {
+			secret := models.Secret{Name: strings.ReplaceAll(key, "_", "."), Value: value}
+			secrets = append(secrets, secret)
+		}
 	}
 	sort.Slice(secrets, func(i, j int) bool {
 		return secrets[i].Name < secrets[j].Name
