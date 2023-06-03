@@ -31,7 +31,7 @@ import (
 
 	"github.com/DopplerHQ/kubernetes-operator/pkg/api"
 	procs "github.com/DopplerHQ/kubernetes-operator/pkg/processors"
-	secretsv1alpha1 "github.com/premiscale/kubernetes-operator/api/v1alpha1"
+	secretsv1alpha1 "github.com/premiscale/kubernetes-operator/tree/configurable-type/api/v1alpha1"
 )
 
 const (

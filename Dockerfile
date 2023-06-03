@@ -20,7 +20,6 @@ COPY controllers/ controllers/
 COPY pkg/ pkg/
 
 # Build
-RUN go get github.com/premiscale/kubernetes-operator/tree/configurable-type/api/v1alpha1
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GO111MODULE=on go build -a -ldflags="-X 'github.com/DopplerHQ/kubernetes-operator/pkg/version.ControllerVersion=${CONTROLLER_VERSION}'" -o manager main.go
 
 # Use distroless as minimal base image to package the manager binary
