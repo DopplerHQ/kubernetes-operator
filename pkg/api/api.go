@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/DopplerHQ/kubernetes-operator/pkg/models"
+	"github.com/premiscale/kubernetes-operator/pkg/models"
 
-	"github.com/DopplerHQ/kubernetes-operator/pkg/version"
+	"github.com/premiscale/kubernetes-operator/pkg/version"
 )
 
 const secretsDownloadFileKey = "DOPPLER_SECRETS_FILE"

@@ -31,9 +31,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	"github.com/DopplerHQ/kubernetes-operator/controllers"
-	"github.com/DopplerHQ/kubernetes-operator/pkg/version"
 	secretsv1alpha1 "github.com/premiscale/kubernetes-operator/api/v1alpha1"
+	"github.com/premiscale/kubernetes-operator/controllers"
+	"github.com/premiscale/kubernetes-operator/pkg/version"
 	//+kubebuilder:scaffold:imports
 )
 

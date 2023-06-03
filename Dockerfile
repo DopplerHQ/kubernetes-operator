@@ -20,7 +20,7 @@ COPY controllers/ controllers/
 COPY pkg/ pkg/
 
 # Build
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GO111MODULE=on go build -a -ldflags="-X 'github.com/DopplerHQ/kubernetes-operator/pkg/version.ControllerVersion=${CONTROLLER_VERSION}'" -o manager main.go
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GO111MODULE=on go build -a -ldflags="-X 'github.com/premiscale/kubernetes-operator/pkg/version.ControllerVersion=${CONTROLLER_VERSION}'" -o manager main.go
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details

@@ -23,7 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	secretsv1alpha1 "github.com/DopplerHQ/kubernetes-operator/api/v1alpha1"
+	secretsv1alpha1 "github.com/premiscale/kubernetes-operator/api/v1alpha1"
 )
 
 func (r *DopplerSecretReconciler) SetSecretsSyncReadyCondition(ctx context.Context, dopplerSecret *secretsv1alpha1.DopplerSecret, updateSecretsError error) {

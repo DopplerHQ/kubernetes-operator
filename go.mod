@@ -3,7 +3,6 @@ module github.com/premiscale/kubernetes-operator
 go 1.16
 
 require (
-	github.com/DopplerHQ/kubernetes-operator v1.2.5
 	github.com/go-logr/logr v0.3.0
 	github.com/onsi/ginkgo v1.14.1
 	github.com/onsi/gomega v1.10.2
