@@ -139,6 +139,7 @@ func GetSecrets(context APIContext, lastETag string, project string, config stri
 		params = append(params, QueryParam{Key: "config", Value: config})
 	}
 	if nameTransformer != "" {
+		fmt.Printf("**debug: name transformer received: %s\n", nameTransformer)
 		if nameTransformer != "tls-var" {
 			params = append(params, QueryParam{Key: "name_transformer", Value: nameTransformer})
 		} else {
