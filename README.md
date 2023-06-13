@@ -203,13 +203,14 @@ Setup is complete! To test the sync behavior, modify a secret in the Doppler das
 
 Name Transformers enable secret names to transformed from Doppler's `UPPER_SNAKE_CASE` format into any of the following environment variable compatible formats:
 
-| Type        | Default         | Transform      |
-|-------------|-----------------|----------------|
-| camel       | API_KEY         | apiKey         |
-| upper-camel | API_KEY         | ApiKey         |
-| lower-snake | API_KEY         | api-key        |
-| tf-var      | API_KEY         | TF_VAR_api_key |
-| dotnet-env  | SMTP__USER_NAME | Smtp__UserName |
+| Type        | Default           | Transform        |
+| ----------- | ----------------- | ---------------- |
+| camel       | API_KEY           | apiKey           |
+| upper-camel | API_KEY           | ApiKey           |
+| lower-snake | API_KEY           | api_key          |
+| tf-var      | API_KEY           | TF_VAR_api_key   |
+| dotnet-env  | SMTP\_\_USER_NAME | Smtp\_\_UserName |
+| lower-kebab | API_KEY           | api-key          |
 
 Simply add the `nameTransformer` field with any of the above types:
 

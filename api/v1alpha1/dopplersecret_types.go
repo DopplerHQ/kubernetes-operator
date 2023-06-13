@@ -74,7 +74,7 @@ type DopplerSecretSpec struct {
 	VerifyTLS bool `json:"verifyTLS,omitempty"`
 
 	// The environment variable compatible secrets name transformer to apply
-	// +kubebuilder:validation:Enum=upper-camel;camel;lower-snake;tf-var;dotnet-env
+	// +kubebuilder:validation:Enum=upper-camel;camel;lower-snake;tf-var;dotnet-env;lower-kebab
 	// +optional
 	NameTransformer string `json:"nameTransformer,omitempty"`
 
