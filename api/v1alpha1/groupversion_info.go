@@ -15,8 +15,8 @@ limitations under the License.
 */
 
 // Package v1alpha1 contains API Schema definitions for the secrets v1alpha1 API group
-//+kubebuilder:object:generate=true
-//+groupName=secrets.doppler.com
+// +kubebuilder:object:generate=true
+// +groupName=secrets.doppler.com
 package v1alpha1
 
 import (
