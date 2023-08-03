@@ -25,8 +25,8 @@ import (
 // This file is meant to be modified as specs change.
 // Important: Run "make" to regenerate code after modifying this file
 
-// A reference to a Kubernetes secret
-type SecretReference struct {
+// A reference to a token Kubernetes secret
+type TokenSecretReference struct {
 	// The name of the Secret resource
 	Name string `json:"name"`
 
@@ -35,10 +35,31 @@ type SecretReference struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
+// A reference to a managed Kubernetes secret
+type ManagedSecretReference struct {
+	// The name of the Secret resource
+	Name string `json:"name"`
+
+	// Namespace of the resource being referred to. Ignored if not cluster scoped
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// The secret type of the managed secret
+	// +kubebuilder:validation:Enum=Opaque;kubernetes.io/tls;kubernetes.io/service-account-token;kubernetes.io/dockercfg;kubernetes.io/dockerconfigjson;kubernetes.io/basic-auth;kubernetes.io/ssh-auth;bootstrap.kubernetes.io/token
+	// +kubebuilder:default=Opaque
+	// +optional
+	Type string `json:"type,omitempty"`
+}
+
 type SecretProcessor struct {
 	// The type of process to be performed, either "plain" or "base64"
 	// +kubebuilder:validation:Enum=plain;base64
+	// +kubebuilder:default=plain
+	// +optional
 	Type string `json:"type"`
+
+	// The mapped name of the field in the managed secret, defaults to the original Doppler secret name for Opaque Kubernetes secrets. If omitted for other types, the value is not copied to the managed secret.
+	AsName string `json:"asName,omitempty"`
 }
 
 type SecretProcessors map[string]*SecretProcessor
@@ -48,10 +69,10 @@ var DefaultProcessor = SecretProcessor{Type: "plain"}
 // DopplerSecretSpec defines the desired state of DopplerSecret
 type DopplerSecretSpec struct {
 	// The Kubernetes secret containing the Doppler service token
-	TokenSecretRef SecretReference `json:"tokenSecret,omitempty"`
+	TokenSecretRef TokenSecretReference `json:"tokenSecret,omitempty"`
 
 	// The Kubernetes secret where the operator will store and sync the fetched secrets
-	ManagedSecretRef SecretReference `json:"managedSecret,omitempty"`
+	ManagedSecretRef ManagedSecretReference `json:"managedSecret,omitempty"`
 
 	// The Doppler project
 	// +optional

@@ -68,13 +68,9 @@ func GetDashboardLink(secrets []models.Secret) string {
 }
 
 // GetReferencedSecret gets a Kubernetes secret from a SecretReference
-func (r *DopplerSecretReconciler) GetReferencedSecret(ctx context.Context, ref secretsv1alpha1.SecretReference) (*corev1.Secret, error) {
-	kubeSecretNamespacedName := types.NamespacedName{
-		Namespace: ref.Namespace,
-		Name:      ref.Name,
-	}
+func (r *DopplerSecretReconciler) GetReferencedSecret(ctx context.Context, namespacedName types.NamespacedName) (*corev1.Secret, error) {
 	existingKubeSecret := &corev1.Secret{}
-	err := r.Client.Get(ctx, kubeSecretNamespacedName, existingKubeSecret)
+	err := r.Client.Get(ctx, namespacedName, existingKubeSecret)
 	if err != nil {
 		existingKubeSecret = nil
 	}
@@ -83,7 +79,11 @@ func (r *DopplerSecretReconciler) GetReferencedSecret(ctx context.Context, ref s
 
 // GetDopplerToken gets the Doppler Service Token referenced by the DopplerSecret
 func (r *DopplerSecretReconciler) GetDopplerToken(ctx context.Context, dopplerSecret secretsv1alpha1.DopplerSecret) (string, error) {
-	tokenSecret, err := r.GetReferencedSecret(ctx, dopplerSecret.Spec.TokenSecretRef)
+	tokenSecretNamespacedName := types.NamespacedName{
+		Name:      dopplerSecret.Spec.TokenSecretRef.Name,
+		Namespace: dopplerSecret.Spec.TokenSecretRef.Namespace,
+	}
+	tokenSecret, err := r.GetReferencedSecret(ctx, tokenSecretNamespacedName)
 	if err != nil {
 		return "", fmt.Errorf("Failed to fetch token secret reference: %w", err)
 	}
@@ -95,16 +95,26 @@ func (r *DopplerSecretReconciler) GetDopplerToken(ctx context.Context, dopplerSe
 }
 
 // GetKubeSecretData generates Kube secret data from a Doppler API secrets result
-func GetKubeSecretData(secretsResult models.SecretsResult, processors secretsv1alpha1.SecretProcessors) (map[string][]byte, error) {
+func GetKubeSecretData(secretsResult models.SecretsResult, processors secretsv1alpha1.SecretProcessors, includeSecretsByDefault bool) (map[string][]byte, error) {
 	kubeSecretData := map[string][]byte{}
 	for _, secret := range secretsResult.Secrets {
-		secretName := secret.Name
-
 		// Processors
 		processor := processors[secret.Name]
 		if processor == nil {
 			processor = &secretsv1alpha1.DefaultProcessor
 		}
+
+		var secretName string
+
+		if processor.AsName != "" {
+			secretName = processor.AsName
+		} else if includeSecretsByDefault {
+			secretName = secret.Name
+		} else {
+			// Omit this secret entirely
+			continue
+		}
+
 		processorFunc := procs.All[processor.Type]
 		if processorFunc == nil {
 			return nil, fmt.Errorf("Failed to process data with unknown processor: %v", processor.Type)
@@ -151,7 +161,11 @@ func GetProcessorsVersion(processors secretsv1alpha1.SecretProcessors) (string, 
 
 // CreateManagedSecret creates a managed Kubernetes secret
 func (r *DopplerSecretReconciler) CreateManagedSecret(ctx context.Context, dopplerSecret secretsv1alpha1.DopplerSecret, secretsResult models.SecretsResult) error {
-	secretData, dataErr := GetKubeSecretData(secretsResult, dopplerSecret.Spec.Processors)
+	var includeSecretsByDefault bool
+	if dopplerSecret.Spec.ManagedSecretRef.Type == string(corev1.SecretTypeOpaque) {
+		includeSecretsByDefault = true
+	}
+	secretData, dataErr := GetKubeSecretData(secretsResult, dopplerSecret.Spec.Processors, includeSecretsByDefault)
 	if dataErr != nil {
 		return fmt.Errorf("Failed to build Kubernetes secret data: %w", dataErr)
 	}
@@ -168,7 +182,7 @@ func (r *DopplerSecretReconciler) CreateManagedSecret(ctx context.Context, doppl
 				"secrets.doppler.com/subtype": "dopplerSecret",
 			},
 		},
-		Type: "Opaque",
+		Type: corev1.SecretType(dopplerSecret.Spec.ManagedSecretRef.Type),
 		Data: secretData,
 	}
 	err := r.Client.Create(ctx, newKubeSecret)
@@ -181,7 +195,11 @@ func (r *DopplerSecretReconciler) CreateManagedSecret(ctx context.Context, doppl
 
 // UpdateManagedSecret updates a managed Kubernetes secret
 func (r *DopplerSecretReconciler) UpdateManagedSecret(ctx context.Context, secret corev1.Secret, dopplerSecret secretsv1alpha1.DopplerSecret, secretsResult models.SecretsResult) error {
-	secretData, dataErr := GetKubeSecretData(secretsResult, dopplerSecret.Spec.Processors)
+	var includeSecretsByDefault bool
+	if dopplerSecret.Spec.ManagedSecretRef.Type == string(corev1.SecretTypeOpaque) {
+		includeSecretsByDefault = true
+	}
+	secretData, dataErr := GetKubeSecretData(secretsResult, dopplerSecret.Spec.Processors, includeSecretsByDefault)
 	if dataErr != nil {
 		return fmt.Errorf("Failed to build Kubernetes secret data: %w", dataErr)
 	}
@@ -214,9 +232,16 @@ func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecre
 		return fmt.Errorf("Failed to load Doppler Token: %w", err)
 	}
 
-	existingKubeSecret, err := r.GetReferencedSecret(ctx, dopplerSecret.Spec.ManagedSecretRef)
+	managedSecretNamespacedName := types.NamespacedName{
+		Name:      dopplerSecret.Spec.ManagedSecretRef.Name,
+		Namespace: dopplerSecret.Spec.ManagedSecretRef.Namespace,
+	}
+	existingKubeSecret, err := r.GetReferencedSecret(ctx, managedSecretNamespacedName)
 	if err != nil && !errors.IsNotFound(err) {
 		return fmt.Errorf("Failed to fetch managed secret reference: %w", err)
+	}
+	if existingKubeSecret != nil && existingKubeSecret.Type != corev1.SecretType(dopplerSecret.Spec.ManagedSecretRef.Type) {
+		return fmt.Errorf("Cannot change existing managed secret type from %v to %v. Delete the managed secret and re-apply the DopplerSecret.", existingKubeSecret.Type, dopplerSecret.Spec.ManagedSecretRef.Type)
 	}
 
 	currentProcessorsVersion, err := GetProcessorsVersion(dopplerSecret.Spec.Processors)
