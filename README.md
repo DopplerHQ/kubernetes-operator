@@ -282,9 +282,14 @@ You can then configure your deployment spec to mount the file at the desired pat
                 path: appsettings.json # Name or path to file name appended to container mountPath
 ```
 
-## Custom Value Encoding With Processors
+## Kubernetes Secret Types and Value Encoding
 
-By default, the operator syncs secret values as they are in Doppler to an [`Opaque` Kubernetes secret](https://kubernetes.io/docs/concepts/configuration/secret/) as Key / Value pairs. In some cases, the value stored in Doppler is not the format required for your Kubernetes deployment. For example, Base64 encoded `.p12` key file that needs to be decoded for mounting in a container in its original binary format. You can use [processors](docs/processors.md) to modify this behavior.
+By default, the operator syncs secret values as they are in Doppler to an [`Opaque` Kubernetes secret](https://kubernetes.io/docs/concepts/configuration/secret/) as Key / Value pairs.
+
+In some cases, the secret name or value stored in Doppler is not the format required for your Kubernetes deployment.
+For example, you might have Base64-encoded TLS data that you want to copy to a native Kubernetes TLS secret (`kubernetes.io/tls`).
+
+You can use [custom types and processors](docs/custom_types_and_processors.md) to achieve this.
 
 ## Failure Strategy and Troubleshooting
 
