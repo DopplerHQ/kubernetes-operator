@@ -90,6 +90,11 @@ func (in *DopplerSecretSpec) DeepCopyInto(out *DopplerSecretSpec) {
 	*out = *in
 	out.TokenSecretRef = in.TokenSecretRef
 	out.ManagedSecretRef = in.ManagedSecretRef
+	if in.Secrets != nil {
+		in, out := &in.Secrets, &out.Secrets
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Processors != nil {
 		in, out := &in.Processors, &out.Processors
 		*out = make(SecretProcessors, len(*in))

@@ -82,6 +82,10 @@ type DopplerSecretSpec struct {
 	// +optional
 	Config string `json:"config,omitempty"`
 
+	// A list of secrets to sync from the config
+	// +optional
+	Secrets []string `json:"secrets,omitempty"`
+
 	// A list of processors to transform the data during ingestion
 	// +kubebuilder:default={}
 	Processors SecretProcessors `json:"processors,omitempty"`

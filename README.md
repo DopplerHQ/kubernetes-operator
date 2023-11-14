@@ -13,7 +13,7 @@ Automatically sync secrets from Doppler to Kubernetes and auto-reload deployment
 
 ## Step 0: Enable Kubernetes Secret Encryption at Rest
 
-The Doppler Kubernetes Operator uses [Kubernetes Secrets](https://kubernetes.io/docs/concepts/configuration/secret/) to store sensitive data. 
+The Doppler Kubernetes Operator uses [Kubernetes Secrets](https://kubernetes.io/docs/concepts/configuration/secret/) to store sensitive data.
 
 Kubernetes Secrets are, by default, stored as unencrypted base64-encoded strings. By default they can be retrieved - as plain text - by anyone with API access, or anyone with access to Kubernetes' underlying data store, etcd. Therefore, Kubernetes recommends enabling [encryption at rest](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/) to secure this data.
 
@@ -281,6 +281,29 @@ You can then configure your deployment spec to mount the file at the desired pat
               - key: DOPPLER_SECRETS_FILE # Hard-coded by Operator when format specified
                 path: appsettings.json # Name or path to file name appended to container mountPath
 ```
+
+## Specifying Secret Subsets to Sync
+
+You can have the operator only sync a subset of secrets in a Doppler config. To do this, specify them in the `secrets` spec property:
+
+```yaml
+apiVersion: secrets.doppler.com/v1alpha1
+kind: DopplerSecret
+metadata:
+  name: dopplersecret-test
+  namespace: doppler-operator-system
+spec:
+  tokenSecret:
+    name: doppler-token-secret
+  secrets:
+    - HOSTNAME
+    - PORT
+  managedSecret:
+    name: doppler-test-secret
+    namespace: default
+```
+
+If this property is omitted all secrets are synced.
 
 ## Kubernetes Secret Types and Value Encoding
 
