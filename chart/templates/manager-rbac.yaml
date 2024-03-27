@@ -1,8 +1,9 @@
----
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: manager-role
+  name: {{ include "chart.fullname" . }}-manager-role
+  labels:
+  {{- include "chart.labels" . | nindent 4 }}
 rules:
 - apiGroups:
   - ""
@@ -50,3 +51,18 @@ rules:
   - get
   - patch
   - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "chart.fullname" . }}-manager-rolebinding
+  labels:
+  {{- include "chart.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: '{{ include "chart.fullname" . }}-manager-role'
+subjects:
+- kind: ServiceAccount
+  name: '{{ include "chart.fullname" . }}-controller-manager'
+  namespace: '{{ .Release.Namespace }}'

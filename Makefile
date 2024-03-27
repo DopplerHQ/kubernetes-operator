@@ -38,7 +38,7 @@ BUNDLE_IMG ?= $(IMAGE_TAG_BASE)-bundle:v$(VERSION)
 # Image URL to use all building/pushing image targets
 IMG ?= dopplerhq/kubernetes-operator:$(VERSION)
 # Produce CRDs that work back to Kubernetes 1.11 (no version conversion)
-CRD_OPTIONS ?= "crd:trivialVersions=true,preserveUnknownFields=false"
+CRD_OPTIONS ?= crd
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -142,7 +142,7 @@ undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/confi
 
 CONTROLLER_GEN = $(shell pwd)/bin/controller-gen
 controller-gen: ## Download controller-gen locally if necessary.
-	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@v0.4.1)
+	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@v0.14.0)
 
 KUSTOMIZE = $(shell pwd)/bin/kustomize
 kustomize: ## Download kustomize locally if necessary.
@@ -242,3 +242,14 @@ catalog-build: opm ## Build a catalog image.
 .PHONY: catalog-push
 catalog-push: ## Push a catalog image.
 	$(MAKE) docker-push IMG=$(CATALOG_IMG)
+
+HELMIFY ?= $(shell pwd)/bin/helmify
+
+.PHONY: helmify
+helmify: $(HELMIFY) ## Download helmify locally if necessary.
+    $(HELMIFY): $(shell pwd)/bin/helmify
+	test -s $(HELMIFY) || GOBIN=$(shell pwd)/bin/ go install github.com/arttor/helmify/cmd/helmify@latest
+    
+helm: manifests kustomize helmify
+	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	$(KUSTOMIZE) build config/default | $(HELMIFY)
