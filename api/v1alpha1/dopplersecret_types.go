@@ -49,6 +49,8 @@ type ManagedSecretReference struct {
 	// +kubebuilder:default=Opaque
 	// +optional
 	Type string `json:"type,omitempty"`
+
+	Labels map[string]string `json:"labels,omitempty"`
 }
 
 type SecretProcessor struct {
