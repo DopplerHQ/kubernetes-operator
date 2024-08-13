@@ -89,7 +89,7 @@ func (in *DopplerSecretList) DeepCopyObject() runtime.Object {
 func (in *DopplerSecretSpec) DeepCopyInto(out *DopplerSecretSpec) {
 	*out = *in
 	out.TokenSecretRef = in.TokenSecretRef
-	out.ManagedSecretRef = in.ManagedSecretRef
+	in.ManagedSecretRef.DeepCopyInto(&out.ManagedSecretRef)
 	if in.Secrets != nil {
 		in, out := &in.Secrets, &out.Secrets
 		*out = make([]string, len(*in))
