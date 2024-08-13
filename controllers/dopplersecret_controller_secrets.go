@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/DopplerHQ/kubernetes-operator/pkg/models"
 
@@ -147,6 +148,19 @@ func GetKubeSecretAnnotations(secretsResult models.SecretsResult, processorsVers
 	return annotations
 }
 
+// GetKubeSecretAnnotations generates Kube labels from a Doppler API secrets result
+func GetKubeSecretLabels(additionalLabels map[string]string) map[string]string {
+	labels := map[string]string{}
+
+	for k, v := range additionalLabels {
+		labels[k] = v
+	}
+
+	labels["secrets.doppler.com/subtype"] = "dopplerSecret"
+
+	return labels
+}
+
 // GetProcessorsVersion generates the version of given processors using a SHA256 hash
 func GetProcessorsVersion(processors secretsv1alpha1.SecretProcessors) (string, error) {
 	if len(processors) == 0 {
@@ -178,9 +192,7 @@ func (r *DopplerSecretReconciler) CreateManagedSecret(ctx context.Context, doppl
 			Name:        dopplerSecret.Spec.ManagedSecretRef.Name,
 			Namespace:   dopplerSecret.Spec.ManagedSecretRef.Namespace,
 			Annotations: GetKubeSecretAnnotations(secretsResult, processorsVersion, dopplerSecret.Spec.Format),
-			Labels: map[string]string{
-				"secrets.doppler.com/subtype": "dopplerSecret",
-			},
+			Labels:      GetKubeSecretLabels(dopplerSecret.Spec.ManagedSecretRef.Labels),
 		},
 		Type: corev1.SecretType(dopplerSecret.Spec.ManagedSecretRef.Type),
 		Data: secretData,
@@ -209,6 +221,7 @@ func (r *DopplerSecretReconciler) UpdateManagedSecret(ctx context.Context, secre
 	}
 	secret.Data = secretData
 	secret.ObjectMeta.Annotations = GetKubeSecretAnnotations(secretsResult, processorsVersion, dopplerSecret.Spec.Format)
+	secret.ObjectMeta.Labels = GetKubeSecretLabels((dopplerSecret.Spec.ManagedSecretRef.Labels))
 	err := r.Client.Update(ctx, &secret)
 	if err != nil {
 		return fmt.Errorf("Failed to update Kubernetes secret: %w", err)
@@ -274,6 +287,18 @@ func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecre
 	if processorsVersionChanged || formatVersionChanged {
 		log.Info("[/] Processor or format version changed, reloading secrets.", "processorsChanged", processorsVersionChanged, "formatChanged", formatVersionChanged)
 		requestedSecretVersion = ""
+	}
+
+	if existingKubeSecret != nil {
+		// Compare existing managed secret labels to labels defined in the doppler secret.
+		// If they are not equal, we will update the managed secret with the new labels.
+		if reflect.DeepEqual(existingKubeSecret.Labels, GetKubeSecretLabels(dopplerSecret.Spec.ManagedSecretRef.Labels)) {
+			log.Info("[-] Managed secret labels not modified.")
+		} else {
+			// If labels have changed, set requestedSecretVersion to an empty secret version to reload the secrets.
+			log.Info("[/] Labels changed, reloading secrets.")
+			requestedSecretVersion = ""
+		}
 	}
 
 	secretsResult, apiErr := api.GetSecrets(GetAPIContext(dopplerSecret, dopplerToken), requestedSecretVersion, dopplerSecret.Spec.Project, dopplerSecret.Spec.Config, dopplerSecret.Spec.NameTransformer, dopplerSecret.Spec.Format, dopplerSecret.Spec.Secrets)
