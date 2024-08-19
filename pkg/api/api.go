@@ -100,6 +100,8 @@ func PerformRequest(context APIContext, req *http.Request) (*APIResponse, *APIEr
 	if err != nil {
 		return nil, &APIError{Err: err, Message: "Unable to load response"}
 	}
+
+	// #nosec G307
 	defer r.Body.Close()
 
 	body, err := ioutil.ReadAll(r.Body)
