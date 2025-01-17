@@ -7,6 +7,7 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    environment: "production"
     permissions:
       contents: write
     steps:
@@ -59,7 +60,18 @@ jobs:
           file: dist/recommended.yaml
           tag: ${{ github.ref }}
 
+      - name: Generate a token
+        id: generate-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: helm-charts
+
       - name: Publish Helm Chart
-        run: ./hack/helm/deploy-pages.sh ./doppler-kubernetes-operator*.tgz
         env:
-          PRIVATE_KEY: ${{ secrets.CHARTS_DEPLOY_PRIVATE_KEY }}
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          gh auth setup-git
+          ./hack/helm/deploy-pages.sh
