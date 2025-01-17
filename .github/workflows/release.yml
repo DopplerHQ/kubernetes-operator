@@ -74,4 +74,4 @@ jobs:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
           gh auth setup-git
-          ./hack/helm/deploy-pages.sh
+          ./hack/helm/deploy-pages.sh ./doppler-kubernetes-operator*.tgz
