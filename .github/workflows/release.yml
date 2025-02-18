@@ -46,7 +46,7 @@ jobs:
 
       - uses: actions/setup-go@v2
         with:
-          go-version: "1.22"
+          go-version: "1.24"
 
       - name: Generate Helm Chart and Recommended YAML
         run: make dist charts
