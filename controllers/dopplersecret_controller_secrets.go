@@ -148,7 +148,7 @@ func GetKubeSecretAnnotations(secretsResult models.SecretsResult, processorsVers
 	return annotations
 }
 
-// GetKubeSecretAnnotations generates Kube labels from a Doppler API secrets result
+// GetKubeSecretLabels generates Kube labels from the provided managed secret spec values
 func GetKubeSecretLabels(additionalLabels map[string]string) map[string]string {
 	labels := map[string]string{}
 
@@ -268,37 +268,38 @@ func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecre
 	// Secret processors
 	processorsVersion := ""
 	formatVersion := ""
+	existingLabels := map[string]string{}
 	if existingKubeSecret != nil {
 		secretVersion = existingKubeSecret.Annotations[kubeSecretVersionAnnotation]
 		processorsVersion = existingKubeSecret.Annotations[kubeSecretProcessorsVersionAnnotation]
 		formatVersion = existingKubeSecret.Annotations[kubeSecretFormatVersionAnnotation]
+		existingLabels = existingKubeSecret.Labels
 	}
 
-	processorsVersionChanged := currentProcessorsVersion != processorsVersion
-	formatVersionChanged := dopplerSecret.Spec.Format != formatVersion
+	changes := []string{}
+
+	// Processors transform secret values so if they've changed, we need to re-fetch the secrets so they can be re-processed.
+	if currentProcessorsVersion != processorsVersion {
+		changes = append(changes, "processors")
+	}
+
+	// The format is computed by the API and it defaults to "json". However, the operator uses the presence of the `format` field
+	// to determine whether or not to process the JSON as separate k/v pairs or save the whole payload into a single DOPPLER_SECRETS_FILE secret.
+	// If the format changed, we need to re-fetch secrets so we can redetermine this.
+	if dopplerSecret.Spec.Format != formatVersion {
+		changes = append(changes, "format")
+	}
+
+	// If the labels have been changed, we don't technically need to reload the secrets but it's simpler to do.
+	if !reflect.DeepEqual(existingLabels, GetKubeSecretLabels(dopplerSecret.Spec.ManagedSecretRef.Labels)) {
+		changes = append(changes, "labels")
+	}
+
+	// If any relevant attributes have been changed, set requestedSecretVersion to an empty secret version to reload the secrets.
 	requestedSecretVersion := secretVersion
-
-	// - Processors transform secret values so if they've changed, we need to re-fetch the secrets so they can be re-processed.
-	// - The format is computed by the API and it defaults to "json". However, the operator uses the presence of the `format` field
-	//   to determine whether or not to process the JSON as separate k/v pairs or save the whole payload into a single DOPPLER_SECRETS_FILE secret.
-	//   If the format changed, we need to re-fetch secrets so we can redetermine this.
-
-	// If either have changed, set requestedSecretVersion to an empty secret version to reload the secrets.
-	if processorsVersionChanged || formatVersionChanged {
-		log.Info("[/] Processor or format version changed, reloading secrets.", "processorsChanged", processorsVersionChanged, "formatChanged", formatVersionChanged)
+	if len(changes) > 0 {
+		log.Info("[/] Attributes have changed, reloading secrets.", "changes", changes)
 		requestedSecretVersion = ""
-	}
-
-	if existingKubeSecret != nil {
-		// Compare existing managed secret labels to labels defined in the doppler secret.
-		// If they are not equal, we will update the managed secret with the new labels.
-		if reflect.DeepEqual(existingKubeSecret.Labels, GetKubeSecretLabels(dopplerSecret.Spec.ManagedSecretRef.Labels)) {
-			log.Info("[-] Managed secret labels not modified.")
-		} else {
-			// If labels have changed, set requestedSecretVersion to an empty secret version to reload the secrets.
-			log.Info("[/] Labels changed, reloading secrets.")
-			requestedSecretVersion = ""
-		}
 	}
 
 	secretsResult, apiErr := api.GetSecrets(GetAPIContext(dopplerSecret, dopplerToken), requestedSecretVersion, dopplerSecret.Spec.Project, dopplerSecret.Spec.Config, dopplerSecret.Spec.NameTransformer, dopplerSecret.Spec.Format, dopplerSecret.Spec.Secrets)
@@ -310,7 +311,7 @@ func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecre
 		return nil
 	}
 
-	log.Info("[/] Secrets have been modified", "oldVersion", secretVersion, "newVersion", secretsResult.ETag, "processorsChanged", processorsVersionChanged)
+	log.Info("[/] Secrets have been modified", "oldVersion", secretVersion, "newVersion", secretsResult.ETag, "changes", changes)
 
 	if existingKubeSecret == nil {
 		return r.CreateManagedSecret(ctx, dopplerSecret, *secretsResult)

@@ -50,6 +50,8 @@ type ManagedSecretReference struct {
 	// +optional
 	Type string `json:"type,omitempty"`
 
+	// Labels to add or update on the managed secret
+	// +optional
 	Labels map[string]string `json:"labels,omitempty"`
 }
 
