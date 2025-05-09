@@ -36,7 +36,7 @@ spec:
 
 First, we've added a `type` field to the managed secret reference to define the `kubernetes.io/tls` managed secret type. When the operator creates the managed secret, it will have this Kubernetes secret type.
 
-We've also added a field called `labels`. These labels will be added verbatim to the `metadata` field in the resulting `Secret`.
+Managed secrets can also specify `labels` and `annotations`. These will be added verbatim to the `metadata` field in the resulting `Secret`.
 
 We've also added a field called `processors`. Processors can make alterations to a secret's name or value before they are saved to the Kubernetes managed secret.
 
