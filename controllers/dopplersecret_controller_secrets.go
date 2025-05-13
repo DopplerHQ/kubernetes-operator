@@ -21,6 +21,8 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"slices"
 
 	"github.com/DopplerHQ/kubernetes-operator/pkg/models"
 
@@ -38,8 +40,11 @@ const (
 	kubeSecretVersionAnnotation           = "secrets.doppler.com/version"
 	kubeSecretProcessorsVersionAnnotation = "secrets.doppler.com/processor-version"
 	kubeSecretFormatVersionAnnotation     = "secrets.doppler.com/format"
+	kubeSecretDashboardLinkAnnotaion      = "secrets.doppler.com/dashboard-link"
 	kubeSecretServiceTokenKey             = "serviceToken"
 )
+
+var kubeSecretBuiltInAnnotationKeys = []string{kubeSecretVersionAnnotation, kubeSecretProcessorsVersionAnnotation, kubeSecretFormatVersionAnnotation, kubeSecretDashboardLinkAnnotaion}
 
 // GetAPIContext generates an APIContext from a DopplerSecret
 func GetAPIContext(dopplerSecret secretsv1alpha1.DopplerSecret, dopplerToken string) api.APIContext {
@@ -130,11 +135,15 @@ func GetKubeSecretData(secretsResult models.SecretsResult, processors secretsv1a
 }
 
 // GetKubeSecretAnnotations generates Kube annotations from a Doppler API secrets result
-func GetKubeSecretAnnotations(secretsResult models.SecretsResult, processorsVersion string, format string) map[string]string {
-	annotations := map[string]string{
-		kubeSecretVersionAnnotation:          secretsResult.ETag,
-		"secrets.doppler.com/dashboard-link": GetDashboardLink(secretsResult.Secrets),
+func GetKubeSecretAnnotations(secretsResult models.SecretsResult, processorsVersion string, format string, additionalLabels map[string]string) map[string]string {
+	annotations := map[string]string{}
+
+	for k, v := range additionalLabels {
+		annotations[k] = v
 	}
+
+	annotations[kubeSecretVersionAnnotation] = secretsResult.ETag
+	annotations[kubeSecretDashboardLinkAnnotaion] = GetDashboardLink(secretsResult.Secrets)
 
 	if len(processorsVersion) > 0 {
 		annotations[kubeSecretProcessorsVersionAnnotation] = processorsVersion
@@ -145,6 +154,19 @@ func GetKubeSecretAnnotations(secretsResult models.SecretsResult, processorsVers
 	}
 
 	return annotations
+}
+
+// GetKubeSecretLabels generates Kube labels from the provided managed secret spec values
+func GetKubeSecretLabels(additionalLabels map[string]string) map[string]string {
+	labels := map[string]string{}
+
+	for k, v := range additionalLabels {
+		labels[k] = v
+	}
+
+	labels["secrets.doppler.com/subtype"] = "dopplerSecret"
+
+	return labels
 }
 
 // GetProcessorsVersion generates the version of given processors using a SHA256 hash
@@ -177,10 +199,8 @@ func (r *DopplerSecretReconciler) CreateManagedSecret(ctx context.Context, doppl
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        dopplerSecret.Spec.ManagedSecretRef.Name,
 			Namespace:   dopplerSecret.Spec.ManagedSecretRef.Namespace,
-			Annotations: GetKubeSecretAnnotations(secretsResult, processorsVersion, dopplerSecret.Spec.Format),
-			Labels: map[string]string{
-				"secrets.doppler.com/subtype": "dopplerSecret",
-			},
+			Annotations: GetKubeSecretAnnotations(secretsResult, processorsVersion, dopplerSecret.Spec.Format, dopplerSecret.Spec.ManagedSecretRef.Annotations),
+			Labels:      GetKubeSecretLabels(dopplerSecret.Spec.ManagedSecretRef.Labels),
 		},
 		Type: corev1.SecretType(dopplerSecret.Spec.ManagedSecretRef.Type),
 		Data: secretData,
@@ -208,7 +228,8 @@ func (r *DopplerSecretReconciler) UpdateManagedSecret(ctx context.Context, secre
 		return fmt.Errorf("Failed to compute processors version: %w", procsVersErr)
 	}
 	secret.Data = secretData
-	secret.ObjectMeta.Annotations = GetKubeSecretAnnotations(secretsResult, processorsVersion, dopplerSecret.Spec.Format)
+	secret.ObjectMeta.Annotations = GetKubeSecretAnnotations(secretsResult, processorsVersion, dopplerSecret.Spec.Format, dopplerSecret.Spec.ManagedSecretRef.Annotations)
+	secret.ObjectMeta.Labels = GetKubeSecretLabels((dopplerSecret.Spec.ManagedSecretRef.Labels))
 	err := r.Client.Update(ctx, &secret)
 	if err != nil {
 		return fmt.Errorf("Failed to update Kubernetes secret: %w", err)
@@ -255,24 +276,56 @@ func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecre
 	// Secret processors
 	processorsVersion := ""
 	formatVersion := ""
+	existingLabels := map[string]string{}
+	existingCustomAnnotations := map[string]string{}
 	if existingKubeSecret != nil {
 		secretVersion = existingKubeSecret.Annotations[kubeSecretVersionAnnotation]
 		processorsVersion = existingKubeSecret.Annotations[kubeSecretProcessorsVersionAnnotation]
 		formatVersion = existingKubeSecret.Annotations[kubeSecretFormatVersionAnnotation]
+		existingLabels = existingKubeSecret.Labels
+		// We can't predict the new annotations because it includes the latest secret version.
+		// Instead, we'll just compare the custom (non-builtin) annotations on the secret against the spec.
+		for k, v := range existingKubeSecret.Annotations {
+			if !slices.Contains(kubeSecretBuiltInAnnotationKeys, k) {
+				existingCustomAnnotations[k] = v
+			}
+		}
 	}
 
-	processorsVersionChanged := currentProcessorsVersion != processorsVersion
-	formatVersionChanged := dopplerSecret.Spec.Format != formatVersion
+	changes := []string{}
+
+	// Processors transform secret values so if they've changed, we need to re-fetch the secrets so they can be re-processed.
+	if currentProcessorsVersion != processorsVersion {
+		changes = append(changes, "processors")
+	}
+
+	// The format is computed by the API and it defaults to "json". However, the operator uses the presence of the `format` field
+	// to determine whether or not to process the JSON as separate k/v pairs or save the whole payload into a single DOPPLER_SECRETS_FILE secret.
+	// If the format changed, we need to re-fetch secrets so we can redetermine this.
+	if dopplerSecret.Spec.Format != formatVersion {
+		changes = append(changes, "format")
+	}
+
+	// If the labels have been changed, we don't technically need to reload the secrets but it's simpler to do.
+	if !reflect.DeepEqual(existingLabels, GetKubeSecretLabels(dopplerSecret.Spec.ManagedSecretRef.Labels)) {
+		changes = append(changes, "labels")
+	}
+
+	customAnnotations := dopplerSecret.Spec.ManagedSecretRef.Annotations
+	if customAnnotations == nil {
+		// Default to empty for comparison
+		customAnnotations = map[string]string{}
+	}
+
+	// If the annotations have been changed, we don't technically need to reload the secrets but it's simpler to do.
+	if !reflect.DeepEqual(existingCustomAnnotations, customAnnotations) {
+		changes = append(changes, "annotations")
+	}
+
+	// If any relevant attributes have been changed, set requestedSecretVersion to an empty secret version to reload the secrets.
 	requestedSecretVersion := secretVersion
-
-	// - Processors transform secret values so if they've changed, we need to re-fetch the secrets so they can be re-processed.
-	// - The format is computed by the API and it defaults to "json". However, the operator uses the presence of the `format` field
-	//   to determine whether or not to process the JSON as separate k/v pairs or save the whole payload into a single DOPPLER_SECRETS_FILE secret.
-	//   If the format changed, we need to re-fetch secrets so we can redetermine this.
-
-	// If either have changed, set requestedSecretVersion to an empty secret version to reload the secrets.
-	if processorsVersionChanged || formatVersionChanged {
-		log.Info("[/] Processor or format version changed, reloading secrets.", "processorsChanged", processorsVersionChanged, "formatChanged", formatVersionChanged)
+	if len(changes) > 0 {
+		log.Info("[/] Attributes have changed, reloading secrets.", "changes", changes)
 		requestedSecretVersion = ""
 	}
 
@@ -285,7 +338,7 @@ func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecre
 		return nil
 	}
 
-	log.Info("[/] Secrets have been modified", "oldVersion", secretVersion, "newVersion", secretsResult.ETag, "processorsChanged", processorsVersionChanged)
+	log.Info("[/] Secrets have been modified", "oldVersion", secretVersion, "newVersion", secretsResult.ETag, "changes", changes)
 
 	if existingKubeSecret == nil {
 		return r.CreateManagedSecret(ctx, dopplerSecret, *secretsResult)

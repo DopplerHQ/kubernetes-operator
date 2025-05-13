@@ -305,6 +305,28 @@ spec:
 
 If this property is omitted all secrets are synced.
 
+## Specifying Labels and Annotations on a Managed Secret
+
+You can specify labels and annotations that the operator should add to the managed Kubernetes `Secret` resource. To do this, specify them in the `managedSecret.labels` and `managedSecret.annotations` spec properties.
+
+```yaml
+apiVersion: secrets.doppler.com/v1alpha1
+kind: DopplerSecret
+metadata:
+  name: dopplersecret-test
+  namespace: doppler-operator-system
+spec:
+  tokenSecret:
+    name: doppler-token-secret
+  managedSecret:
+    name: doppler-test-secret
+    namespace: default
+    labels:
+      doppler-secret-label: test
+    annotations:
+      doppler-secret-annotation: test
+```
+
 ## Kubernetes Secret Types and Value Encoding
 
 By default, the operator syncs secret values as they are in Doppler to an [`Opaque` Kubernetes secret](https://kubernetes.io/docs/concepts/configuration/secret/) as Key / Value pairs.
