@@ -113,7 +113,13 @@ func (r *DopplerSecretReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	err = r.UpdateSecret(ctx, dopplerSecret)
 	r.SetSecretsSyncReadyCondition(ctx, &dopplerSecret, err)
 	if err != nil {
-		log.Error(err, "Unable to update dopplersecret")
+		logMsg := "Unable to update dopplersecret"
+		// log rate limits at info level so they can be told apart from other errors and silenced by setting log level to error
+		if errors.IsTooManyRequests(err) {
+			log.WithValues("error", err).Info(logMsg)
+		} else {
+			log.Error(err, logMsg)
+		}
 		return ctrl.Result{
 			RequeueAfter: requeueAfter,
 		}, nil
