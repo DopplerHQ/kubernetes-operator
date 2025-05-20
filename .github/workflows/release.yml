@@ -49,7 +49,7 @@ jobs:
           go-version: "1.24"
 
       - name: Generate Helm Chart and Recommended YAML
-        run: make dist charts
+        run: make dist helm
         env:
           VERSION: ${{ steps.extract.outputs.version }}
 

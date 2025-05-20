@@ -55,13 +55,7 @@ const (
 func (r *DopplerSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Log.WithValues("dopplersecret", req.NamespacedName)
 
-	ownNamespace, namespaceErr := GetOwnNamespace()
-	if namespaceErr != nil {
-		log.Error(namespaceErr, "Unable to load current namespace")
-		return ctrl.Result{
-			RequeueAfter: defaultRequeueDuration,
-		}, nil
-	}
+	clusterNamespace := GetClusterNamespace()
 
 	dopplerSecret := secretsv1alpha1.DopplerSecret{}
 	err := r.Client.Get(ctx, req.NamespacedName, &dopplerSecret)
@@ -86,12 +80,12 @@ func (r *DopplerSecretReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		managedSecretRefNamespace = dopplerSecret.Namespace
 	}
 
-	if ownNamespace == dopplerSecret.Namespace {
-		log.Info("Reconciling dopplersecret in operator namespace, references can be in any namespace.")
+	if clusterNamespace != "" && clusterNamespace == dopplerSecret.Namespace {
+    log.Info("Reconciling dopplersecret in cluster-defined namespace, references can be in any namespace.", "clusterNamespace", clusterNamespace)
 	} else if dopplerSecret.Namespace == tokenSecretRefNamespace && dopplerSecret.Namespace == managedSecretRefNamespace {
-		log.Info("Reconciling dopplersecret in non-operator namespace, all references are in the same namespace as the dopplersecret.")
+		log.Info("Reconciling dopplersecret in non-cluster namespace, all references are in the same namespace as the dopplersecret.", "clusterNamespace", clusterNamespace)
 	} else {
-		p1 := fmt.Sprintf("cannot reconcile dopplersecret (%v/%v) in a namespace different from the operator (%v)", dopplerSecret.Namespace, dopplerSecret.Name, ownNamespace)
+		p1 := fmt.Sprintf("cannot reconcile dopplersecret (%v/%v) in a namespace different from the cluster-defined (%v)", dopplerSecret.Namespace, dopplerSecret.Name, clusterNamespace)
 		p2 := fmt.Sprintf("unless all secret references [(%v/%v), (%v/%v)] are also in the dopplersecret's namespace", tokenSecretRefNamespace, dopplerSecret.Spec.TokenSecretRef.Name, managedSecretRefNamespace, dopplerSecret.Spec.ManagedSecretRef.Name)
 		log.Error(fmt.Errorf("%v %v", p1, p2), "")
 		return ctrl.Result{}, nil
