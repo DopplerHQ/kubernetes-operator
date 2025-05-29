@@ -100,7 +100,7 @@ build: generate fmt vet ## Build manager binary.
 	go build ${GO_BUILD_VERSION_FLAGS} -o bin/manager main.go
 
 run: manifests generate fmt vet ## Run a controller from your host. Does not use VERSION flags.
-	POD_NAMESPACE=doppler-operator-system go run ./main.go
+	CLUSTER_DOPPLERSECRET_NAMESPACE=doppler-operator-system go run ./main.go
 
 docker-build: test ## Build docker image with the manager.
 	docker build --build-arg CONTROLLER_VERSION=${VERSION} -t ${IMG} .
@@ -116,23 +116,31 @@ install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~
 uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config.
 	$(KUSTOMIZE) build config/crd | kubectl delete -f -
 
+RECOMMENDED_YAML_FILE = dist/recommended.yaml
 dist: manifests kustomize
 	mkdir -p dist
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	$(KUSTOMIZE) build config/default > dist/recommended.yaml
+	$(KUSTOMIZE) build config/default > $(RECOMMENDED_YAML_FILE)
 
+HELMIFY = $(shell pwd)/bin/helmify
+helmify:
+	$(call go-get-tool,$(HELMIFY),github.com/arttor/helmify/cmd/helmify@v0.4.18)
+    
 CHART_DIR = charts/doppler-kubernetes-operator
-charts: manifests kustomize helm-tool yq dist
-	mkdir -p $(CHART_DIR)/crds
-	mkdir -p $(CHART_DIR)/templates
-	$(YQ) e 'select(.kind == "CustomResourceDefinition")' dist/recommended.yaml > $(CHART_DIR)/crds/all.yaml
-	# Inject 'helm.sh/resource-policy: keep' into doppler-operator-system namespace to prevent it from being destroyed if chart is uninstalled.
-	# This will also allow future versions of the chart to remove this resource entirely.
-	$(YQ) e 'select(.kind == "Namespace") | .metadata.annotations."helm.sh/resource-policy" = "keep"' dist/recommended.yaml > $(CHART_DIR)/templates/namespace.yaml
-	$(YQ) e 'select(.kind != "CustomResourceDefinition" and .kind != "Namespace")' dist/recommended.yaml > $(CHART_DIR)/templates/all.yaml
+helm: manifests kustomize helmify helm-tool yq dist
+	cat $(RECOMMENDED_YAML_FILE) | $(HELMIFY) $(CHART_DIR)
 	cp hack/helm/Chart.yaml $(CHART_DIR)/
-	cp hack/helm/NOTES.txt $(CHART_DIR)/templates/
-	touch $(CHART_DIR)/values.yaml
+	# `--crd-dir` flag works based on filenames (https://github.com/arttor/helmify/issues/163)
+	# We have to copy the CRD directly into the `crd` dir manually
+	mkdir -p $(CHART_DIR)/crds
+	cat $(RECOMMENDED_YAML_FILE) | $(YQ) e 'select(.kind == "CustomResourceDefinition")' > $(CHART_DIR)/crds/all.yaml
+	# Remove the unrendered/template copy before packaging
+	rm $(CHART_DIR)/templates/*-crd.yaml
+	# Doppler Kubernetes Operator Versions before v2.0.0 were installed with a hard-coded `doppler-operator-system` namespace.
+	# Doppler recommended that users store DopplerSecret CRs and token secrets in this namespace.
+	# Versions >=2.0.0 respect the namespace used for the helm installation but if we don't include the `doppler-operator-system` namespace in the chart,
+	# it will be removed during the upgrade and delete the resources inside.
+	cp hack/helm/cluster-dopplersecret-namespace.yaml $(CHART_DIR)/templates/
 	helm package $(CHART_DIR) --version $(VERSION)
 
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
