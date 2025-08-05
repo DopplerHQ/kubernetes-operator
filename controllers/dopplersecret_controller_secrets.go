@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"time"
 
 	"github.com/DopplerHQ/kubernetes-operator/pkg/models"
 
@@ -41,10 +42,12 @@ const (
 	kubeSecretProcessorsVersionAnnotation = "secrets.doppler.com/processor-version"
 	kubeSecretFormatVersionAnnotation     = "secrets.doppler.com/format"
 	kubeSecretDashboardLinkAnnotaion      = "secrets.doppler.com/dashboard-link"
+	kubeSecretManagedByAnnotation         = "secrets.doppler.com/managed-by"
+	kubeSecretLastUpdatedAnnotation       = "secrets.doppler.com/last-updated"
 	kubeSecretServiceTokenKey             = "serviceToken"
 )
 
-var kubeSecretBuiltInAnnotationKeys = []string{kubeSecretVersionAnnotation, kubeSecretProcessorsVersionAnnotation, kubeSecretFormatVersionAnnotation, kubeSecretDashboardLinkAnnotaion}
+var kubeSecretBuiltInAnnotationKeys = []string{kubeSecretVersionAnnotation, kubeSecretProcessorsVersionAnnotation, kubeSecretFormatVersionAnnotation, kubeSecretDashboardLinkAnnotaion, kubeSecretManagedByAnnotation, kubeSecretLastUpdatedAnnotation}
 
 // GetAPIContext generates an APIContext from a DopplerSecret
 func GetAPIContext(dopplerSecret secretsv1alpha1.DopplerSecret, dopplerToken string) api.APIContext {
@@ -135,7 +138,7 @@ func GetKubeSecretData(secretsResult models.SecretsResult, processors secretsv1a
 }
 
 // GetKubeSecretAnnotations generates Kube annotations from a Doppler API secrets result
-func GetKubeSecretAnnotations(secretsResult models.SecretsResult, processorsVersion string, format string, additionalLabels map[string]string) map[string]string {
+func GetKubeSecretAnnotations(secretsResult models.SecretsResult, processorsVersion string, format string, additionalLabels map[string]string, managedBy string) map[string]string {
 	annotations := map[string]string{}
 
 	for k, v := range additionalLabels {
@@ -144,6 +147,8 @@ func GetKubeSecretAnnotations(secretsResult models.SecretsResult, processorsVers
 
 	annotations[kubeSecretVersionAnnotation] = secretsResult.ETag
 	annotations[kubeSecretDashboardLinkAnnotaion] = GetDashboardLink(secretsResult.Secrets)
+	annotations[kubeSecretManagedByAnnotation] = managedBy
+	annotations[kubeSecretLastUpdatedAnnotation] = time.Now().UTC().Format(time.RFC3339)
 
 	if len(processorsVersion) > 0 {
 		annotations[kubeSecretProcessorsVersionAnnotation] = processorsVersion
@@ -199,7 +204,7 @@ func (r *DopplerSecretReconciler) CreateManagedSecret(ctx context.Context, doppl
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        dopplerSecret.Spec.ManagedSecretRef.Name,
 			Namespace:   dopplerSecret.Spec.ManagedSecretRef.Namespace,
-			Annotations: GetKubeSecretAnnotations(secretsResult, processorsVersion, dopplerSecret.Spec.Format, dopplerSecret.Spec.ManagedSecretRef.Annotations),
+			Annotations: GetKubeSecretAnnotations(secretsResult, processorsVersion, dopplerSecret.Spec.Format, dopplerSecret.Spec.ManagedSecretRef.Annotations, dopplerSecret.GetNamespacedName()),
 			Labels:      GetKubeSecretLabels(dopplerSecret.Spec.ManagedSecretRef.Labels),
 		},
 		Type: corev1.SecretType(dopplerSecret.Spec.ManagedSecretRef.Type),
@@ -228,7 +233,7 @@ func (r *DopplerSecretReconciler) UpdateManagedSecret(ctx context.Context, secre
 		return fmt.Errorf("Failed to compute processors version: %w", procsVersErr)
 	}
 	secret.Data = secretData
-	secret.ObjectMeta.Annotations = GetKubeSecretAnnotations(secretsResult, processorsVersion, dopplerSecret.Spec.Format, dopplerSecret.Spec.ManagedSecretRef.Annotations)
+	secret.ObjectMeta.Annotations = GetKubeSecretAnnotations(secretsResult, processorsVersion, dopplerSecret.Spec.Format, dopplerSecret.Spec.ManagedSecretRef.Annotations, dopplerSecret.GetNamespacedName())
 	secret.ObjectMeta.Labels = GetKubeSecretLabels((dopplerSecret.Spec.ManagedSecretRef.Labels))
 	err := r.Client.Update(ctx, &secret)
 	if err != nil {
