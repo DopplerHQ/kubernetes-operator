@@ -76,7 +76,7 @@ var DefaultProcessor = SecretProcessor{Type: "plain"}
 
 // DopplerSecretSpec defines the desired state of DopplerSecret
 type DopplerSecretSpec struct {
-	// The Kubernetes secret containing the Doppler service token
+	// The Kubernetes secret containing either a Doppler service token or OIDC configuration
 	TokenSecretRef TokenSecretReference `json:"tokenSecret,omitempty"`
 
 	// The Kubernetes secret where the operator will store and sync the fetched secrets
