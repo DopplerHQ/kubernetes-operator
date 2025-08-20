@@ -46,6 +46,7 @@ const (
 //+kubebuilder:rbac:groups=secrets.doppler.com,resources=dopplersecrets/finalizers,verbs=update
 
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;delete
+//+kubebuilder:rbac:groups="",resources=serviceaccounts/token,verbs=create
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=list;watch;get;update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -76,24 +77,29 @@ func (r *DopplerSecretReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}, nil
 	}
 
+	authNamespace := dopplerSecret.Spec.TokenSecretRef.Namespace
+	authName := dopplerSecret.Spec.TokenSecretRef.Name
+
 	// If omitted, the default namespace for references is the DopplerSecret's namespace
-	tokenSecretRefNamespace := dopplerSecret.Spec.TokenSecretRef.Namespace
-	if tokenSecretRefNamespace == "" {
-		tokenSecretRefNamespace = dopplerSecret.Namespace
+	if authNamespace == "" {
+		authNamespace = dopplerSecret.Namespace
 	}
-	managedSecretRefNamespace := dopplerSecret.Spec.ManagedSecretRef.Namespace
-	if managedSecretRefNamespace == "" {
-		managedSecretRefNamespace = dopplerSecret.Namespace
+	managedSecretNamespace := dopplerSecret.Spec.ManagedSecretRef.Namespace
+	if managedSecretNamespace == "" {
+		managedSecretNamespace = dopplerSecret.Namespace
 	}
 
+	// Check namespace restrictions
 	if ownNamespace == dopplerSecret.Namespace {
-		log.Info("Reconciling dopplersecret in operator namespace, references can be in any namespace.")
-	} else if dopplerSecret.Namespace == tokenSecretRefNamespace && dopplerSecret.Namespace == managedSecretRefNamespace {
-		log.Info("Reconciling dopplersecret in non-operator namespace, all references are in the same namespace as the dopplersecret.")
+		log.Info("Reconciling dopplersecret in operator namespace, references can be in any namespace")
+	} else if dopplerSecret.Namespace == authNamespace && dopplerSecret.Namespace == managedSecretNamespace {
+		log.Info("Reconciling dopplersecret, all references are in the same namespace")
 	} else {
-		p1 := fmt.Sprintf("cannot reconcile dopplersecret (%v/%v) in a namespace different from the operator (%v)", dopplerSecret.Namespace, dopplerSecret.Name, ownNamespace)
-		p2 := fmt.Sprintf("unless all secret references [(%v/%v), (%v/%v)] are also in the dopplersecret's namespace", tokenSecretRefNamespace, dopplerSecret.Spec.TokenSecretRef.Name, managedSecretRefNamespace, dopplerSecret.Spec.ManagedSecretRef.Name)
-		log.Error(fmt.Errorf("%v %v", p1, p2), "")
+		err := fmt.Errorf("cannot reconcile dopplersecret (%s/%s) in namespace different from operator (%s) "+
+			"unless all references [token: (%s/%s), managed: (%s/%s)] are in the dopplersecret's namespace",
+			dopplerSecret.Namespace, dopplerSecret.Name, ownNamespace,
+			authNamespace, authName, managedSecretNamespace, dopplerSecret.Spec.ManagedSecretRef.Name)
+		log.Error(err, "")
 		return ctrl.Result{}, nil
 	}
 

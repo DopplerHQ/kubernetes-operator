@@ -3,7 +3,10 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strings"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -13,7 +16,20 @@ import (
 	secretsv1alpha1 "github.com/DopplerHQ/kubernetes-operator/api/v1alpha1"
 	"github.com/DopplerHQ/kubernetes-operator/pkg/api"
 	"github.com/DopplerHQ/kubernetes-operator/pkg/auth"
+	"github.com/DopplerHQ/kubernetes-operator/pkg/cache"
 )
+
+var (
+	oidcProviderCache *cache.Cache[*auth.OIDCAuthProvider]
+)
+
+func InitializeOIDCCache(log logr.Logger, cacheSize int) {
+	oidcProviderCache = cache.New(cacheSize, func(provider *auth.OIDCAuthProvider) {
+		log.Info("Evicting OIDC provider from cache",
+			"namespace", provider.Namespace,
+			"identity", provider.Identity)
+	})
+}
 
 // Interface for different authentication methods
 type AuthProvider interface {
@@ -23,7 +39,7 @@ type AuthProvider interface {
 // Handle service token authentication
 type ServiceTokenAuthProvider struct {
 	client    client.Client
-	tokenRef  *secretsv1alpha1.TokenSecretReference
+	tokenRef  secretsv1alpha1.TokenSecretReference
 	namespace string
 	host      string
 	verifyTLS bool
@@ -41,12 +57,12 @@ func (s *ServiceTokenAuthProvider) GetAPIContext(ctx context.Context) (*api.APIC
 		Namespace: tokenNamespace,
 	}, &tokenSecret)
 	if err != nil {
-		return nil, fmt.Errorf("unable to fetch token secret: %w", err)
+		return nil, fmt.Errorf("Unable to fetch token secret: %w", err)
 	}
 
 	serviceToken, ok := tokenSecret.Data["serviceToken"]
 	if !ok {
-		return nil, fmt.Errorf("token secret does not contain 'serviceToken' field")
+		return nil, fmt.Errorf("Token secret does not contain 'serviceToken' field")
 	}
 
 	return &api.APIContext{
@@ -59,37 +75,57 @@ func (s *ServiceTokenAuthProvider) GetAPIContext(ctx context.Context) (*api.APIC
 // Handle OIDC authentication
 type OIDCAuthProvider struct {
 	oidcProvider *auth.OIDCAuthProvider
-	host         string
-	verifyTLS    bool
+	cacheKey     cache.Key
 }
 
 func (o *OIDCAuthProvider) GetAPIContext(ctx context.Context) (*api.APIContext, error) {
 	token, err := o.oidcProvider.GetToken(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("unable to get OIDC token: %w", err)
+		// On error, remove from cache to force retry
+		oidcProviderCache.Remove(o.cacheKey)
+		return nil, fmt.Errorf("Unable to get OIDC token: %w", err)
 	}
 
 	return &api.APIContext{
-		Host:      o.host,
+		Host:      o.oidcProvider.Host,
 		APIKey:    token,
-		VerifyTLS: o.verifyTLS,
+		VerifyTLS: o.oidcProvider.VerifyTLS,
 	}, nil
 }
 
 // Determine which authentication provider to use
 func (r *DopplerSecretReconciler) getAuthProvider(ctx context.Context, dopplerSecret *secretsv1alpha1.DopplerSecret) (AuthProvider, error) {
-	// Ensure only one auth method is specced
-	if dopplerSecret.Spec.OIDCAuth != nil && dopplerSecret.Spec.TokenSecretRef != nil {
-		return nil, fmt.Errorf("cannot specify both 'oidcAuth' and 'tokenSecret' fields - use one or the other")
+	// Check what the token secret contains to determine auth type
+	tokenSecret := corev1.Secret{}
+	tokenNamespace := dopplerSecret.Namespace
+	if dopplerSecret.Spec.TokenSecretRef.Namespace != "" {
+		tokenNamespace = dopplerSecret.Spec.TokenSecretRef.Namespace
 	}
 
-	// Check for OIDC auth config
-	if dopplerSecret.Spec.OIDCAuth != nil {
-		return r.createOIDCAuthProvider(ctx, dopplerSecret)
+	err := r.Client.Get(ctx, types.NamespacedName{
+		Name:      dopplerSecret.Spec.TokenSecretRef.Name,
+		Namespace: tokenNamespace,
+	}, &tokenSecret)
+	if err != nil {
+		return nil, fmt.Errorf("Unable to fetch token secret: %w", err)
 	}
 
-	// Check for TokenSecretRef field
-	if dopplerSecret.Spec.TokenSecretRef != nil {
+	// Check what authentication fields exist
+	_, hasServiceToken := tokenSecret.Data["serviceToken"]
+	identity, hasIdentity := tokenSecret.Data["identity"]
+
+	// Ensure mutual exclusivity
+	if hasServiceToken && hasIdentity {
+		return nil, fmt.Errorf("Token secret cannot contain both 'serviceToken' and 'identity' fields - use one or the other")
+	}
+
+	// Use OIDC authentication
+	if hasIdentity {
+		return r.createOIDCAuthProvider(dopplerSecret, string(identity), tokenSecret)
+	}
+
+	// Use service token authentication
+	if hasServiceToken {
 		return &ServiceTokenAuthProvider{
 			client:    r.Client,
 			tokenRef:  dopplerSecret.Spec.TokenSecretRef,
@@ -99,46 +135,93 @@ func (r *DopplerSecretReconciler) getAuthProvider(ctx context.Context, dopplerSe
 		}, nil
 	}
 
-	return nil, fmt.Errorf("no authentication method configured")
+	return nil, fmt.Errorf("Token secret must contain either 'serviceToken' or 'identity' field")
 }
 
 // Create an OIDC authentication provider
-func (r *DopplerSecretReconciler) createOIDCAuthProvider(ctx context.Context, dopplerSecret *secretsv1alpha1.DopplerSecret) (AuthProvider, error) {
-	oidcConfig := dopplerSecret.Spec.OIDCAuth
-
-	// Create kubernetes clientset for TokenRequest API
-	config, err := ctrl.GetConfig()
+func (r *DopplerSecretReconciler) createOIDCAuthProvider(dopplerSecret *secretsv1alpha1.DopplerSecret, identity string, tokenSecret corev1.Secret) (AuthProvider, error) {
+	operatorNamespace, err := GetOwnNamespace()
 	if err != nil {
-		return nil, fmt.Errorf("unable to get kubernetes config: %w", err)
+		return nil, fmt.Errorf("Unable to get operator namespace: %w", err)
 	}
 
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("unable to create kubernetes clientset: %w", err)
+	audiences := []string{
+		dopplerSecret.Spec.Host,
+		// The dopplerTokenSecret audience allows us to validate that the token was issued
+		// for this specific token secret
+		fmt.Sprintf("dopplerTokenSecret:%s:%s",
+			tokenSecret.Namespace,
+			tokenSecret.Name),
 	}
 
-	// Determine service account namespace
-	saNamespace := dopplerSecret.Namespace
-	if oidcConfig.ServiceAccountRef.Namespace != "" {
-		saNamespace = oidcConfig.ServiceAccountRef.Namespace
+	// If the identity is a UUID, we add it as an additional audience to allow for a
+	// cryptographic binding of the JWT to its intended identity
+	uuidRegex := regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+	if uuidRegex.MatchString(strings.ToLower(identity)) {
+		audiences = append(audiences, identity)
 	}
 
-	// Use configured TTL
-	tokenTTL := time.Duration(*oidcConfig.ExpirationSeconds) * time.Second
-
-	authConfig := auth.OIDCConfig{
-		ServiceAccountName: oidcConfig.ServiceAccountRef.Name,
-		Namespace:          saNamespace,
-		Audiences:          oidcConfig.Audiences,
-		IdentityID:         oidcConfig.IdentityID,
-		TokenTTL:           tokenTTL,
+	// Get expiration seconds from secret, default to 600
+	expirationSeconds := int64(600)
+	if expSecondsData, ok := tokenSecret.Data["expirationSeconds"]; ok {
+		if _, err := fmt.Sscanf(string(expSecondsData), "%d", &expirationSeconds); err != nil {
+			r.Log.Info("Invalid expirationSeconds in token secret, using default",
+				"value", string(expSecondsData),
+				"default", expirationSeconds)
+		}
 	}
 
-	oidcProvider := auth.NewOIDCAuthProvider(clientset, authConfig, dopplerSecret.Spec.Host, dopplerSecret.Spec.VerifyTLS)
+	cacheKey := cache.Key{
+		Identity:  identity,
+		Audiences: strings.Join(audiences, ","),
+	}
+
+	var oidcProvider *auth.OIDCAuthProvider
+
+	if cachedProvider, found := oidcProviderCache.Get(cacheKey); found {
+		oidcProvider = cachedProvider
+		r.Log.Info("Using cached OIDC provider",
+			"namespace", dopplerSecret.Namespace,
+			"name", dopplerSecret.Name,
+			"cacheKey", cacheKey)
+	}
+
+	if oidcProvider == nil {
+		r.Log.Info("Creating new OIDC provider",
+			"namespace", dopplerSecret.Namespace,
+			"name", dopplerSecret.Name,
+			"identity", identity)
+
+		config, err := ctrl.GetConfig()
+		if err != nil {
+			return nil, fmt.Errorf("Unable to get kubernetes config: %w", err)
+		}
+
+		clientset, err := kubernetes.NewForConfig(config)
+		if err != nil {
+			return nil, fmt.Errorf("Unable to create kubernetes clientset: %w", err)
+		}
+
+		oidcProvider = &auth.OIDCAuthProvider{
+			kubeClient:        clientset,
+			Namespace:         operatorNamespace,
+			Audiences:         audiences,
+			Host:              dopplerSecret.Spec.Host,
+			Identity:          identity,
+			VerifyTLS:         dopplerSecret.Spec.VerifyTLS, // Defaults to true via kubebuilder annotation in CRD
+			ExpirationSeconds: expirationSeconds,
+		}
+
+		// Add to cache
+		oidcProviderCache.Add(cacheKey, oidcProvider)
+		r.Log.Info("Added OIDC provider to cache",
+			"namespace", dopplerSecret.Namespace,
+			"name", dopplerSecret.Name,
+			"cacheKey", cacheKey)
+	}
 
 	return &OIDCAuthProvider{
 		oidcProvider: oidcProvider,
-		host:         dopplerSecret.Spec.Host,
-		verifyTLS:    dopplerSecret.Spec.VerifyTLS,
+		cacheKey:     cacheKey,
 	}, nil
 }
