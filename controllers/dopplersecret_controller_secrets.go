@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"regexp"
 	"slices"
 
 	"github.com/DopplerHQ/kubernetes-operator/pkg/models"
@@ -100,9 +101,25 @@ func (r *DopplerSecretReconciler) GetDopplerToken(ctx context.Context, dopplerSe
 }
 
 // GetKubeSecretData generates Kube secret data from a Doppler API secrets result
-func GetKubeSecretData(secretsResult models.SecretsResult, processors secretsv1alpha1.SecretProcessors, includeSecretsByDefault bool) (map[string][]byte, error) {
+func GetKubeSecretData(secretsResult models.SecretsResult, processors secretsv1alpha1.SecretProcessors, includeSecretsByDefault bool, excludeSecretsRegex string) (map[string][]byte, error) {
 	kubeSecretData := map[string][]byte{}
+
+	// Compile regex pattern for exclusion if provided
+	var excludeRegex *regexp.Regexp
+	if excludeSecretsRegex != "" {
+		var err error
+		excludeRegex, err = regexp.Compile(excludeSecretsRegex)
+		if err != nil {
+			return nil, fmt.Errorf("Invalid exclude secrets regex pattern '%s': %w", excludeSecretsRegex, err)
+		}
+	}
+
 	for _, secret := range secretsResult.Secrets {
+		// Skip secrets that match the exclusion regex
+		if excludeRegex != nil && excludeRegex.MatchString(secret.Name) {
+			continue
+		}
+
 		// Processors
 		processor := processors[secret.Name]
 		if processor == nil {
@@ -187,7 +204,7 @@ func (r *DopplerSecretReconciler) CreateManagedSecret(ctx context.Context, doppl
 	if dopplerSecret.Spec.ManagedSecretRef.Type == string(corev1.SecretTypeOpaque) {
 		includeSecretsByDefault = true
 	}
-	secretData, dataErr := GetKubeSecretData(secretsResult, dopplerSecret.Spec.Processors, includeSecretsByDefault)
+	secretData, dataErr := GetKubeSecretData(secretsResult, dopplerSecret.Spec.Processors, includeSecretsByDefault, dopplerSecret.Spec.ExcludeSecretsRegex)
 	if dataErr != nil {
 		return fmt.Errorf("Failed to build Kubernetes secret data: %w", dataErr)
 	}
@@ -219,7 +236,7 @@ func (r *DopplerSecretReconciler) UpdateManagedSecret(ctx context.Context, secre
 	if dopplerSecret.Spec.ManagedSecretRef.Type == string(corev1.SecretTypeOpaque) {
 		includeSecretsByDefault = true
 	}
-	secretData, dataErr := GetKubeSecretData(secretsResult, dopplerSecret.Spec.Processors, includeSecretsByDefault)
+	secretData, dataErr := GetKubeSecretData(secretsResult, dopplerSecret.Spec.Processors, includeSecretsByDefault, dopplerSecret.Spec.ExcludeSecretsRegex)
 	if dataErr != nil {
 		return fmt.Errorf("Failed to build Kubernetes secret data: %w", dataErr)
 	}
