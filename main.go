@@ -54,11 +54,13 @@ func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string
+	var oidcProviderCacheSize int
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
+	flag.IntVar(&oidcProviderCacheSize, "oidc-provider-cache-size", 2<<13, "Size of the OIDC provider cache. Set to 0 to disable caching.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -66,6 +68,9 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	log := ctrl.Log.WithName("controllers").WithName("DopplerSecret")
+
+	controllers.InitializeOIDCCache(log, oidcProviderCacheSize)
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
@@ -83,7 +88,7 @@ func main() {
 
 	if err = (&controllers.DopplerSecretReconciler{
 		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("DopplerSecret"),
+		Log:    log,
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "DopplerSecret")

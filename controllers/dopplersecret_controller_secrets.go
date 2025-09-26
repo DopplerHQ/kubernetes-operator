@@ -46,15 +46,6 @@ const (
 
 var kubeSecretBuiltInAnnotationKeys = []string{kubeSecretVersionAnnotation, kubeSecretProcessorsVersionAnnotation, kubeSecretFormatVersionAnnotation, kubeSecretDashboardLinkAnnotaion}
 
-// GetAPIContext generates an APIContext from a DopplerSecret
-func GetAPIContext(dopplerSecret secretsv1alpha1.DopplerSecret, dopplerToken string) api.APIContext {
-	return api.APIContext{
-		Host:      dopplerSecret.Spec.Host,
-		VerifyTLS: dopplerSecret.Spec.VerifyTLS,
-		APIKey:    dopplerToken,
-	}
-}
-
 // GetDashboardLink gets a link to the Doppler dashboard from a list of Doppler secrets
 func GetDashboardLink(secrets []models.Secret) string {
 	var projectSlug string
@@ -244,13 +235,20 @@ func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecre
 	if dopplerSecret.Spec.ManagedSecretRef.Namespace == "" {
 		dopplerSecret.Spec.ManagedSecretRef.Namespace = dopplerSecret.Namespace
 	}
+
+	// Handle namespace defaults
 	if dopplerSecret.Spec.TokenSecretRef.Namespace == "" {
 		dopplerSecret.Spec.TokenSecretRef.Namespace = dopplerSecret.Namespace
 	}
 
-	dopplerToken, err := r.GetDopplerToken(ctx, dopplerSecret)
+	authProvider, err := r.getAuthProvider(ctx, &dopplerSecret)
 	if err != nil {
-		return fmt.Errorf("Failed to load Doppler Token: %w", err)
+		return fmt.Errorf("Failed to get auth provider: %w", err)
+	}
+
+	apiContext, err := authProvider.GetAPIContext(ctx)
+	if err != nil {
+		return fmt.Errorf("Failed to get API context: %w", err)
 	}
 
 	managedSecretNamespacedName := types.NamespacedName{
@@ -329,7 +327,7 @@ func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecre
 		requestedSecretVersion = ""
 	}
 
-	secretsResult, apiErr := api.GetSecrets(GetAPIContext(dopplerSecret, dopplerToken), requestedSecretVersion, dopplerSecret.Spec.Project, dopplerSecret.Spec.Config, dopplerSecret.Spec.NameTransformer, dopplerSecret.Spec.Format, dopplerSecret.Spec.Secrets)
+	secretsResult, apiErr := api.GetSecrets(*apiContext, requestedSecretVersion, dopplerSecret.Spec.Project, dopplerSecret.Spec.Config, dopplerSecret.Spec.NameTransformer, dopplerSecret.Spec.Format, dopplerSecret.Spec.Secrets)
 	if apiErr != nil {
 		return apiErr
 	}

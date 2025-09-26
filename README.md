@@ -60,12 +60,20 @@ You can verify that the operator is running successfully in your cluster with `.
 
 A `DopplerSecret` is a custom Kubernetes resource with references to two secrets:
 
-- A Kubernetes secret where your Doppler Service Token is stored (AKA "Doppler Token Secret"). This token will be used to fetch secrets from your Doppler config. The operator will be looking for the token in the `serviceToken` field of this secret.
+- A Kubernetes secret containing either your Doppler Service Token (in the `serviceToken` field) OR OIDC configuration (in the `identity` field) for authentication (AKA "Doppler Token Secret")
 - A Kubernetes secret where your synced Doppler secrets will be stored (AKA "Managed Secret"). This secret will be created by the operator if it does not already exist.
 
 > Note: While these resources can be created in any namespace, it is recommended that you create your Doppler Token Secret and DopplerSecret inside the `doppler-operator-system` namespace to prevent unauthorized access. The managed secret should be namespaced with the deployments which will use the secret.
 
-Generate a Doppler Service Token and use it in this command to create your Doppler token secret:
+### Authentication Setup
+
+The operator supports two authentication methods: Service Token and OIDC.
+
+Configure either a Workplace Role or a set of Project Access permissions on your Doppler Service Account to allow the appropriate access.
+
+#### Option 1: Service Token Authentication
+
+Generate a Doppler Service Token and create a secret:
 
 ```bash
 kubectl create secret generic doppler-token-secret -n doppler-operator-system --from-literal=serviceToken=dp.st.dev.XXXX
@@ -74,10 +82,26 @@ kubectl create secret generic doppler-token-secret -n doppler-operator-system --
 If you have the Doppler CLI installed, you can generate a Doppler Service Token from the CLI and create the Doppler token secret in one step:
 
 ```bash
-kubectl create secret generic doppler-token-secret -n doppler-operator-system --from-literal=serviceToken=$(doppler configs tokens create doppler-kubernetes-operator --plain)
+kubectl create secret generic doppler-token-secret -n doppler-operator-system --from-literal=serviceToken=$(doppler configs tokens create doppler-kubernetes-operator --project example-project --config prd --plain)
 ```
 
-Next, we'll create a `DopplerSecret` that references your Doppler token secret and defines the location of the managed secret.
+#### Option 2: OIDC Authentication
+
+First, ensure your cluster's OIDC discovery URLs are publicly accessible. Then create a Doppler [Service Account Identity](https://docs.doppler.com/docs/service-account-identities) with:
+
+- **Audience**: `dopplerTokenSecret:doppler-operator-system:doppler-token-secret`, where `doppler-token-secret` is the name of the secret created in the next step, and `doppler-operator-system` is the namespace.
+  - Alternatively, you may specify an audience claim of `https://api.doppler.com` if you would like any token issued by the cluster to the `doppler-operator-controller-manager` service account to be able to authenticate using this identity.
+- **Subject**: `system:serviceaccount:doppler-operator-system:doppler-operator-controller-manager`, the operator's shared ServiceAccount.
+
+Create a secret containing your OIDC configuration:
+
+```bash
+kubectl create secret generic doppler-token-secret -n doppler-operator-system --from-literal=identity=YOUR_IDENTITY_ID
+```
+
+### Creating the DopplerSecret
+
+Next, create a `DopplerSecret` that references your authentication secret and defines the location of the managed secret:
 
 ```yaml
 apiVersion: secrets.doppler.com/v1alpha1
@@ -86,8 +110,10 @@ metadata:
   name: dopplersecret-test # DopplerSecret Name
   namespace: doppler-operator-system
 spec:
-  tokenSecret: # Kubernetes service token secret (namespace defaults to doppler-operator-system)
+  tokenSecret: # References the auth secret created above
     name: doppler-token-secret
+  project: example-project # Doppler project
+  config: prd # Doppler config
   managedSecret: # Kubernetes managed secret (will be created if does not exist)
     name: doppler-test-secret
     namespace: default # Should match the namespace of deployments that will use the secret
@@ -98,6 +124,8 @@ If you're following along with these example names, you can apply this sample di
 ```bash
 kubectl apply -f config/samples/secrets_v1alpha1_dopplersecret.yaml
 ```
+
+### Verify Secret Creation
 
 Check that the associated Kubernetes secret has been created:
 
