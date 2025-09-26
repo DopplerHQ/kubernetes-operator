@@ -203,7 +203,7 @@ func (r *DopplerSecretReconciler) createOIDCAuthProvider(dopplerSecret *secretsv
 		}
 
 		oidcProvider = &auth.OIDCAuthProvider{
-			kubeClient:        clientset,
+			KubeClient:        clientset,
 			Namespace:         operatorNamespace,
 			Audiences:         audiences,
 			Host:              dopplerSecret.Spec.Host,

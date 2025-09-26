@@ -19,7 +19,7 @@ import (
 // Handle OIDC-based authentication
 type OIDCAuthProvider struct {
 	// Kubernetes client for TokenRequest API
-	kubeClient kubernetes.Interface
+	KubeClient kubernetes.Interface
 
 	Namespace string
 	Audiences []string
@@ -93,7 +93,7 @@ func (o *OIDCAuthProvider) getServiceAccountToken(ctx context.Context) (string, 
 		},
 	}
 
-	tokenResponse, err := o.kubeClient.CoreV1().
+	tokenResponse, err := o.KubeClient.CoreV1().
 		ServiceAccounts(o.Namespace).
 		CreateToken(ctx, "doppler-operator-controller-manager", tokenRequest, metav1.CreateOptions{})
 
