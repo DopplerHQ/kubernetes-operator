@@ -94,6 +94,10 @@ type DopplerSecretSpec struct {
 	// +optional
 	Secrets []string `json:"secrets,omitempty"`
 
+	// Regex pattern to exclude secrets that match this pattern from being synced
+	// +optional
+	ExcludeSecretsRegex string `json:"excludeSecretsRegex,omitempty"`
+
 	// A list of processors to transform the data during ingestion
 	// +kubebuilder:default={}
 	Processors SecretProcessors `json:"processors,omitempty"`
