@@ -89,19 +89,24 @@ kubectl create secret generic doppler-token-secret -n doppler-operator-system --
 
 First, ensure your cluster's OIDC discovery URLs are publicly accessible. Then create a Doppler [Service Account Identity](https://docs.doppler.com/docs/service-account-identities) with:
 
-- **Audience**: `dopplerTokenSecret:doppler-operator-system:doppler-token-secret`, where `doppler-token-secret` is the name of the secret created in the next step, and `doppler-operator-system` is the namespace.
-  - Alternatively, you may specify an audience claim of `https://api.doppler.com` if you would like any token issued by the cluster to the `doppler-operator-controller-manager` service account to be able to authenticate using this identity.
+- **Audience**:
+  - If using identity in tokenSecret: `dopplerTokenSecret:doppler-operator-system:doppler-token-secret`, where `doppler-token-secret` is the name of the tokenSecret and `doppler-operator-system` is the namespace.
+  - If using identity in DopplerSecret spec: `dopplerSecret:doppler-operator-system:dopplersecret-test`, where `dopplersecret-test` is the name of the DopplerSecret and `doppler-operator-system` is the namespace.
 - **Subject**: `system:serviceaccount:doppler-operator-system:doppler-operator-controller-manager`, the operator's shared ServiceAccount.
 
-Create a secret containing your OIDC configuration:
+Either create a secret containing your identity:
 
 ```bash
 kubectl create secret generic doppler-token-secret -n doppler-operator-system --from-literal=identity=YOUR_IDENTITY_ID
 ```
 
+Or include the identity directly in the DopplerSecret spec (see Service Account Identity example below).
+
 ### Creating the DopplerSecret
 
 Next, create a `DopplerSecret` that references your authentication secret and defines the location of the managed secret:
+
+**Example with Doppler token secret:**
 
 ```yaml
 apiVersion: secrets.doppler.com/v1alpha1
@@ -110,13 +115,30 @@ metadata:
   name: dopplersecret-test # DopplerSecret Name
   namespace: doppler-operator-system
 spec:
-  tokenSecret: # References the auth secret created above
+  tokenSecret: # References the auth secret created above (containing Service Token or Service Account Identity)
     name: doppler-token-secret
   project: example-project # Doppler project
   config: prd # Doppler config
   managedSecret: # Kubernetes managed secret (will be created if does not exist)
     name: doppler-test-secret
     namespace: default # Should match the namespace of deployments that will use the secret
+```
+
+**Example with Service Account Identity provided in DopplerSecret spec:**
+
+```yaml
+apiVersion: secrets.doppler.com/v1alpha1
+kind: DopplerSecret
+metadata:
+  name: dopplersecret-test
+  namespace: doppler-operator-system
+spec:
+  identity: 00000000-0000-0000-0000-000000000000 # Doppler Service Account Identity
+  project: example-project
+  config: prd
+  managedSecret:
+    name: doppler-test-secret
+    namespace: default
 ```
 
 If you're following along with these example names, you can apply this sample directly:

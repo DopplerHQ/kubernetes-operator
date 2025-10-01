@@ -95,6 +95,11 @@ func (o *OIDCAuthProvider) GetAPIContext(ctx context.Context) (*api.APIContext, 
 
 // Determine which authentication provider to use
 func (r *DopplerSecretReconciler) getAuthProvider(ctx context.Context, dopplerSecret *secretsv1alpha1.DopplerSecret) (AuthProvider, error) {
+	// Use OIDC authentication with identity from spec
+	if dopplerSecret.Spec.Identity != "" {
+		return r.createOIDCAuthProvider(dopplerSecret, dopplerSecret.Spec.Identity, nil)
+	}
+
 	// Check what the token secret contains to determine auth type
 	tokenSecret := corev1.Secret{}
 	tokenNamespace := dopplerSecret.Namespace
@@ -112,16 +117,16 @@ func (r *DopplerSecretReconciler) getAuthProvider(ctx context.Context, dopplerSe
 
 	// Check what authentication fields exist
 	_, hasServiceToken := tokenSecret.Data["serviceToken"]
-	identity, hasIdentity := tokenSecret.Data["identity"]
+	tokenSecretIdentity, hasTokenSecretIdentity := tokenSecret.Data["identity"]
 
-	// Ensure mutual exclusivity
-	if hasServiceToken && hasIdentity {
+	// Ensure mutual exclusivity between auth methods
+	if hasServiceToken && hasTokenSecretIdentity {
 		return nil, fmt.Errorf("Token secret cannot contain both 'serviceToken' and 'identity' fields - use one or the other")
 	}
 
 	// Use OIDC authentication
-	if hasIdentity {
-		return r.createOIDCAuthProvider(dopplerSecret, string(identity), tokenSecret)
+	if hasTokenSecretIdentity {
+		return r.createOIDCAuthProvider(dopplerSecret, string(tokenSecretIdentity), &tokenSecret)
 	}
 
 	// Use service token authentication
@@ -139,7 +144,7 @@ func (r *DopplerSecretReconciler) getAuthProvider(ctx context.Context, dopplerSe
 }
 
 // Create an OIDC authentication provider
-func (r *DopplerSecretReconciler) createOIDCAuthProvider(dopplerSecret *secretsv1alpha1.DopplerSecret, identity string, tokenSecret corev1.Secret) (AuthProvider, error) {
+func (r *DopplerSecretReconciler) createOIDCAuthProvider(dopplerSecret *secretsv1alpha1.DopplerSecret, identity string, tokenSecret *corev1.Secret) (AuthProvider, error) {
 	operatorNamespace, err := GetOwnNamespace()
 	if err != nil {
 		return nil, fmt.Errorf("Unable to get operator namespace: %w", err)
@@ -147,11 +152,20 @@ func (r *DopplerSecretReconciler) createOIDCAuthProvider(dopplerSecret *secretsv
 
 	audiences := []string{
 		dopplerSecret.Spec.Host,
+	}
+
+	// Add audience for validation that the token was issued for this specific resource
+	if tokenSecret != nil {
 		// The dopplerTokenSecret audience allows us to validate that the token was issued
 		// for this specific token secret
-		fmt.Sprintf("dopplerTokenSecret:%s:%s",
+		audiences = append(audiences, fmt.Sprintf("dopplerTokenSecret:%s:%s",
 			tokenSecret.Namespace,
-			tokenSecret.Name),
+			tokenSecret.Name))
+	} else {
+		// Identity is provided in the DopplerSecret, so we include a dopplerSecret audience
+		audiences = append(audiences, fmt.Sprintf("dopplerSecret:%s:%s",
+			dopplerSecret.Namespace,
+			dopplerSecret.Name))
 	}
 
 	// If the identity is a UUID, we add it as an additional audience to allow for a
@@ -161,13 +175,25 @@ func (r *DopplerSecretReconciler) createOIDCAuthProvider(dopplerSecret *secretsv
 		audiences = append(audiences, identity)
 	}
 
-	// Get expiration seconds from secret, default to 600
+	// Get expiration seconds from spec or secret, default to 600
 	expirationSeconds := int64(600)
-	if expSecondsData, ok := tokenSecret.Data["expirationSeconds"]; ok {
-		if _, err := fmt.Sscanf(string(expSecondsData), "%d", &expirationSeconds); err != nil {
-			r.Log.Info("Invalid expirationSeconds in token secret, using default",
-				"value", string(expSecondsData),
-				"default", expirationSeconds)
+
+	// Ensure mutual exclusivity for expirationSeconds
+	if dopplerSecret.Spec.ExpirationSeconds > 0 && tokenSecret != nil {
+		if _, ok := tokenSecret.Data["expirationSeconds"]; ok {
+			return nil, fmt.Errorf("expirationSeconds specified in both DopplerSecret spec and tokenSecret - use one or the other")
+		}
+	}
+
+	if dopplerSecret.Spec.ExpirationSeconds > 0 {
+		expirationSeconds = dopplerSecret.Spec.ExpirationSeconds
+	} else if tokenSecret != nil {
+		if expSecondsData, ok := tokenSecret.Data["expirationSeconds"]; ok {
+			if _, err := fmt.Sscanf(string(expSecondsData), "%d", &expirationSeconds); err != nil {
+				r.Log.Info("Invalid expirationSeconds in token secret, using default",
+					"value", string(expSecondsData),
+					"default", expirationSeconds)
+			}
 		}
 	}
 

@@ -75,12 +75,22 @@ type SecretProcessors map[string]*SecretProcessor
 var DefaultProcessor = SecretProcessor{Type: "plain"}
 
 // DopplerSecretSpec defines the desired state of DopplerSecret
+// +kubebuilder:validation:XValidation:rule="(has(self.tokenSecret) && !has(self.identity)) || (!has(self.tokenSecret) && has(self.identity))",message="Must specify either tokenSecret or identity, but not both"
 type DopplerSecretSpec struct {
-	// The Kubernetes secret containing either a Doppler service token or OIDC configuration
+	// The Kubernetes secret containing either a Doppler service token or OIDC configuration. Mutually exclusive with 'identity'.
+	// +optional
 	TokenSecretRef TokenSecretReference `json:"tokenSecret,omitempty"`
 
 	// The Kubernetes secret where the operator will store and sync the fetched secrets
 	ManagedSecretRef ManagedSecretReference `json:"managedSecret,omitempty"`
+
+	// The Doppler Service Account Identity (OIDC). Mutually exclusive with 'tokenSecret'.
+	// +optional
+	Identity string `json:"identity,omitempty"`
+
+	// The JWT expiration time in seconds for OIDC authentication. This controls the lifetime of the Kubernetes ServiceAccount token requested via the TokenRequest API. Kubernetes enforces a minimum of 600 seconds (10 minutes). Defaults to 600 if not specified.
+	// +optional
+	ExpirationSeconds int64 `json:"expirationSeconds,omitempty"`
 
 	// The Doppler project
 	// +optional
