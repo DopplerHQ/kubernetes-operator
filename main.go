@@ -31,6 +31,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	secretsv1alpha1 "github.com/DopplerHQ/kubernetes-operator/api/v1alpha1"
@@ -62,15 +63,22 @@ func main() {
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.IntVar(&oidcProviderCacheSize, "oidc-provider-cache-size", 2<<13, "Size of the OIDC provider cache. Set to 0 to disable caching.")
-	// defaults to LevelInfo
 	logLevel := new(slog.LevelVar)
-	flag.TextVar(logLevel, "log-level", logLevel, "Log level (debug, info, warn, error)")
+	flag.TextVar(logLevel, "log-level", logLevel, "Log level for JSON format (debug, info, warn, error)")
+	opts := zap.Options{
+		Development: true,
+	}
+	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
-	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: logLevel,
-	})
-	ctrl.SetLogger(logr.FromSlogHandler(handler))
+	if os.Getenv("LOG_FORMAT") == "json" {
+		handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			Level: logLevel,
+		})
+		ctrl.SetLogger(logr.FromSlogHandler(handler))
+	} else {
+		ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	}
 	log := ctrl.Log.WithName("controllers").WithName("DopplerSecret")
 
 	controllers.InitializeOIDCCache(log, oidcProviderCacheSize)
