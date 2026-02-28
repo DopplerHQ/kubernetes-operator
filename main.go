@@ -18,12 +18,14 @@ package main
 
 import (
 	"flag"
+	"log/slog"
 	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -61,13 +63,22 @@ func main() {
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.IntVar(&oidcProviderCacheSize, "oidc-provider-cache-size", 2<<13, "Size of the OIDC provider cache. Set to 0 to disable caching.")
+	logLevel := new(slog.LevelVar)
+	flag.TextVar(logLevel, "log-level", logLevel, "Log level for JSON format (debug, info, warn, error)")
 	opts := zap.Options{
 		Development: true,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	if os.Getenv("LOG_FORMAT") == "json" {
+		handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			Level: logLevel,
+		})
+		ctrl.SetLogger(logr.FromSlogHandler(handler))
+	} else {
+		ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	}
 	log := ctrl.Log.WithName("controllers").WithName("DopplerSecret")
 
 	controllers.InitializeOIDCCache(log, oidcProviderCacheSize)
