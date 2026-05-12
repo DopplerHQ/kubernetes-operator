@@ -1,0 +1,6 @@
+The Doppler Kubernetes Operator has been installed.
+
+To configure the operator, see https://github.com/DopplerHQ/kubernetes-operator
+
+To verify the operator is running:
+  kubectl get pods -n {{ .Values.namespace }}

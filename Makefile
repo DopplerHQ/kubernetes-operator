@@ -121,16 +121,14 @@ dist: manifests kustomize
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default > dist/recommended.yaml
 
+HELM_SRC_DIR = helm/doppler-kubernetes-operator
 CHART_DIR = charts/doppler-kubernetes-operator
-charts: manifests kustomize helm-tool yq dist
-	mkdir -p $(CHART_DIR)/crds
-	mkdir -p $(CHART_DIR)/templates
-	$(YQ) e 'select(.kind == "CustomResourceDefinition")' dist/recommended.yaml > $(CHART_DIR)/crds/all.yaml
-	$(YQ) e 'select(.kind != "CustomResourceDefinition")' dist/recommended.yaml > $(CHART_DIR)/templates/all.yaml
-	cp hack/helm/Chart.yaml $(CHART_DIR)/
-	cp hack/helm/NOTES.txt $(CHART_DIR)/templates/
-	touch $(CHART_DIR)/values.yaml
-	helm package $(CHART_DIR) --version $(VERSION)
+charts: manifests helm-tool
+	rm -rf $(CHART_DIR)
+	mkdir -p $(dir $(CHART_DIR))
+	cp -r $(HELM_SRC_DIR) $(CHART_DIR)
+	cp config/crd/bases/secrets.doppler.com_dopplersecrets.yaml $(CHART_DIR)/crds/all.yaml
+	helm package $(CHART_DIR) --version $(VERSION) --app-version $(VERSION)
 
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}

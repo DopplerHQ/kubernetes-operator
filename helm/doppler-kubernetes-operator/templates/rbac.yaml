@@ -1,0 +1,135 @@
+---
+# Manager ClusterRole - permissions for the operator controller
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "doppler-operator.fullname" . }}-manager-role
+  labels:
+    {{- include "doppler-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - update
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - serviceaccounts/token
+    verbs:
+      - create
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    verbs:
+      - get
+      - list
+      - update
+      - watch
+  - apiGroups:
+      - secrets.doppler.com
+    resources:
+      - dopplersecrets
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - secrets.doppler.com
+    resources:
+      - dopplersecrets/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - secrets.doppler.com
+    resources:
+      - dopplersecrets/status
+    verbs:
+      - get
+      - patch
+      - update
+---
+# Manager ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "doppler-operator.fullname" . }}-manager-rolebinding
+  labels:
+    {{- include "doppler-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "doppler-operator.fullname" . }}-manager-role
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "doppler-operator.serviceAccountName" . }}
+    namespace: {{ .Values.namespace }}
+---
+# Leader Election Role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "doppler-operator.fullname" . }}-leader-election-role
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "doppler-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+---
+# Leader Election RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "doppler-operator.fullname" . }}-leader-election-rolebinding
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "doppler-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "doppler-operator.fullname" . }}-leader-election-role
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "doppler-operator.serviceAccountName" . }}
+    namespace: {{ .Values.namespace }}

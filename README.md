@@ -28,7 +28,43 @@ helm repo add doppler https://helm.doppler.com
 helm install --generate-name doppler/doppler-kubernetes-operator
 ```
 
-Updates can be performed with `helm upgrade`.
+#### Customizing the Deployment
+
+The Helm chart supports customizing the operator deployment via `values.yaml` or `--set` flags. Common options include:
+
+| Parameter | Description | Default |
+| --------- | ----------- | ------- |
+| `image.repository` | Operator image repository | `dopplerhq/kubernetes-operator` |
+| `image.tag` | Operator image tag | `latest` |
+| `replicaCount` | Number of operator replicas | `1` |
+| `resources.limits.cpu` | CPU limit | `100m` |
+| `resources.limits.memory` | Memory limit | `256Mi` |
+| `resources.requests.cpu` | CPU request | `100m` |
+| `resources.requests.memory` | Memory request | `256Mi` |
+| `nodeSelector` | Node selector for operator pods | `{}` |
+| `tolerations` | Tolerations for operator pods | `[]` |
+| `affinity` | Affinity rules for operator pods | `{}` |
+| `leaderElect` | Enable leader election for HA | `true` |
+| `serviceAccount.annotations` | Annotations for the operator ServiceAccount | `{}` |
+| `namespace` | Namespace for the operator | `doppler-operator-system` |
+
+For example, to increase the operator's memory limit:
+
+```bash
+helm install --generate-name doppler/doppler-kubernetes-operator \
+  --set resources.limits.memory=512Mi \
+  --set resources.requests.memory=512Mi
+```
+
+#### Upgrading
+
+Updates can be performed with `helm upgrade`:
+
+```bash
+helm upgrade <release-name> doppler/doppler-kubernetes-operator
+```
+
+If you are upgrading from a version of the chart prior to the introduction of customizable values, the upgrade will remove an unused `doppler-operator-manager-config` ConfigMap. This ConfigMap was never mounted by the operator and its removal has no effect on functionality.
 
 One caveat is that [Helm cannot update custom resource definitions (CRDs)](https://helm.sh/docs/chart_best_practices/custom_resource_definitions/#some-caveats-and-explanations).
 To simplify this, Doppler guarantees that CRDs will remain backwards compatible. CRDs can be updated directly from the Helm chart manifest with:

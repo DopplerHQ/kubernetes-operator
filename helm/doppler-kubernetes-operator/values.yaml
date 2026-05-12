@@ -1,0 +1,37 @@
+## Namespace for the operator
+namespace: doppler-operator-system
+
+## Controller manager image
+image:
+  repository: dopplerhq/kubernetes-operator
+  tag: latest
+  pullPolicy: IfNotPresent
+
+## Number of controller manager replicas
+replicaCount: 1
+
+## Resource requests and limits for the controller manager container
+resources:
+  limits:
+    cpu: 100m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+## Node selector for the controller manager pods
+nodeSelector: {}
+
+## Tolerations for the controller manager pods
+tolerations: []
+
+## Affinity rules for the controller manager pods
+affinity: {}
+
+## Leader election enables HA by ensuring only one active controller
+leaderElect: true
+
+## ServiceAccount configuration
+serviceAccount:
+  ## Annotations to add to the service account
+  annotations: {}
