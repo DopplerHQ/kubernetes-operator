@@ -1,9 +1,10 @@
-on:
-  push:
-  schedule:
-    - cron: "0 0 * * *"
+name: Scanners
 
-name: Salus security scan
+permissions:
+  contents: read
+
+on:
+  pull_request:
 
 jobs:
   gosec:
@@ -12,18 +13,21 @@ jobs:
       GO111MODULE: on
     steps:
       - name: Checkout Source
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
       - name: Run Gosec Security Scanner
-        uses: securego/gosec@master
+        uses: securego/gosec@4a3bd8af174872c778439083ded7adbf3747e770
         with:
           args: ./...
 
   govulncheck:
     runs-on: ubuntu-latest
-    name: Run govulncheck
+    name: govulncheck
     steps:
+      - name: Checkout Source
+        uses: actions/checkout@v6
       - id: govulncheck
-        uses: golang/govulncheck-action@v1
+        uses: golang/govulncheck-action@31f7c5463448f83528bd771c2d978d940080c9fd
         with:
-          go-version-input: 1.24
+          repo-checkout: false
+          cache-dependency-path: "go.sum"
           go-package: ./...
