@@ -89,9 +89,11 @@ func (r *DopplerSecretReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		managedSecretNamespace = dopplerSecret.Namespace
 	}
 
-	// Check namespace restrictions
+	// Check namespace restrictions (skip managed secret check if not configured)
 	if ownNamespace == dopplerSecret.Namespace {
 		log.Info("Reconciling dopplersecret in operator namespace, references can be in any namespace")
+	} else if dopplerSecret.Spec.ManagedSecretRef.Name == "" && dopplerSecret.Namespace == authNamespace {
+		log.Info("Reconciling dopplersecret without managed secret, token reference is in the same namespace")
 	} else if dopplerSecret.Namespace == authNamespace && dopplerSecret.Namespace == managedSecretNamespace {
 		log.Info("Reconciling dopplersecret, all references are in the same namespace")
 	} else {
@@ -116,7 +118,7 @@ func (r *DopplerSecretReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
-	err = r.UpdateSecret(ctx, dopplerSecret)
+	secretVersion, err := r.UpdateSecret(ctx, dopplerSecret)
 	r.SetSecretsSyncReadyCondition(ctx, &dopplerSecret, err)
 	if err != nil {
 		log.Error(err, "Unable to update dopplersecret")
@@ -125,7 +127,7 @@ func (r *DopplerSecretReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}, nil
 	}
 
-	numDeployments, err := r.ReconcileDeploymentsUsingSecret(ctx, dopplerSecret)
+	numDeployments, err := r.ReconcileDeploymentsForDopplerSecret(ctx, dopplerSecret, secretVersion)
 	r.SetDeploymentReloadReadyCondition(ctx, &dopplerSecret, numDeployments, err)
 	if err != nil {
 		log.Error(err, "Failed to update deployments")

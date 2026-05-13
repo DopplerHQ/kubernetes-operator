@@ -32,48 +32,80 @@ import (
 const (
 	deploymentSecretUpdateAnnotationPrefix = "secrets.doppler.com/secretsupdate"
 	deploymentRestartAnnotation            = "secrets.doppler.com/reload"
+	deploymentDopplerSecretRefAnnotation   = "secrets.doppler.com/dopplersecret"
 )
 
-// Reconciles deployments marked with the restart annotation and that use the specified DopplerSecret.
-func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Context, dopplerSecret secretsv1alpha1.DopplerSecret) (int, error) {
+// ReconcileDeploymentsForDopplerSecret restarts deployments that are linked to the given DopplerSecret.
+// A deployment is matched if it has the reload annotation and either references the managed Kubernetes
+// secret (envFrom / secretKeyRef / volumes) or references the DopplerSecret by namespaced name in an
+// annotation (used for CSI-mounted deployments where no managed secret exists).
+func (r *DopplerSecretReconciler) ReconcileDeploymentsForDopplerSecret(ctx context.Context, dopplerSecret secretsv1alpha1.DopplerSecret, secretVersion string) (int, error) {
 	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName())
-	namespace := dopplerSecret.Namespace
+
+	// Collect namespaces to scan for deployments
+	namespaces := map[string]bool{dopplerSecret.Namespace: true}
 	if dopplerSecret.Spec.ManagedSecretRef.Namespace != "" {
-		namespace = dopplerSecret.Spec.ManagedSecretRef.Namespace
+		namespaces[dopplerSecret.Spec.ManagedSecretRef.Namespace] = true
 	}
-	deploymentList := &v1.DeploymentList{}
-	err := r.Client.List(ctx, deploymentList, &client.ListOptions{Namespace: namespace})
-	if err != nil {
-		return 0, fmt.Errorf("Unable to fetch deployments: %w", err)
+
+	// If there is a managed secret, fetch it for version tracking
+	var kubeSecret *corev1.Secret
+	if dopplerSecret.Spec.ManagedSecretRef.Name != "" {
+		namespace := dopplerSecret.Namespace
+		if dopplerSecret.Spec.ManagedSecretRef.Namespace != "" {
+			namespace = dopplerSecret.Spec.ManagedSecretRef.Namespace
+		}
+		kubeSecretNamespacedName := types.NamespacedName{
+			Namespace: namespace,
+			Name:      dopplerSecret.Spec.ManagedSecretRef.Name,
+		}
+		secret := &corev1.Secret{}
+		err := r.Client.Get(ctx, kubeSecretNamespacedName, secret)
+		if err != nil {
+			return 0, fmt.Errorf("Unable to fetch Kubernetes secret to update deployment: %w", err)
+		}
+		kubeSecret = secret
 	}
-	kubeSecretNamespacedName := types.NamespacedName{
-		Namespace: namespace,
-		Name:      dopplerSecret.Spec.ManagedSecretRef.Name,
-	}
-	kubeSecret := &corev1.Secret{}
-	err = r.Client.Get(ctx, kubeSecretNamespacedName, kubeSecret)
-	if err != nil {
-		return 0, fmt.Errorf("Unable to fetch Kubernetes secret to update deployment: %w", err)
-	}
+
 	var wg sync.WaitGroup
-	for _, deployment := range deploymentList.Items {
-		if deployment.Annotations[deploymentRestartAnnotation] == "true" && r.IsDeploymentUsingSecret(deployment, dopplerSecret) {
-			wg.Add(1)
-			go func(deployment v1.Deployment, kubeSecret corev1.Secret, wg *sync.WaitGroup) {
-				defer wg.Done()
-				err := r.ReconcileDeployment(ctx, deployment, kubeSecret)
-				if err != nil {
-					// Errors reconciling deployments are logged but not propagated up. Failed deployments will be reconciled on the next run.
-					log.Error(err, "Unable to reconcile deployment")
-				}
-			}(deployment, *kubeSecret, &wg)
+	totalDeployments := 0
+
+	for namespace := range namespaces {
+		deploymentList := &v1.DeploymentList{}
+		err := r.Client.List(ctx, deploymentList, &client.ListOptions{Namespace: namespace})
+		if err != nil {
+			return 0, fmt.Errorf("Unable to fetch deployments: %w", err)
+		}
+		totalDeployments += len(deploymentList.Items)
+
+		for _, deployment := range deploymentList.Items {
+			if deployment.Annotations[deploymentRestartAnnotation] != "true" {
+				continue
+			}
+			usesSecret := r.IsDeploymentUsingSecret(deployment, dopplerSecret)
+			refersViaAnnotation := r.IsDeploymentReferencingDopplerSecret(deployment, dopplerSecret)
+			if usesSecret || refersViaAnnotation {
+				wg.Add(1)
+				go func(deployment v1.Deployment) {
+					defer wg.Done()
+					var err error
+					if kubeSecret != nil {
+						err = r.ReconcileDeployment(ctx, deployment, *kubeSecret)
+					} else {
+						err = r.ReconcileDeploymentWithVersion(ctx, deployment, dopplerSecret.Name, secretVersion)
+					}
+					if err != nil {
+						log.Error(err, "Unable to reconcile deployment")
+					}
+				}(deployment)
+			}
 		}
 	}
 	wg.Wait()
 
-	log.Info("Finished reconciling deployments", "numDeployments", len(deploymentList.Items))
+	log.Info("Finished reconciling deployments", "numDeployments", totalDeployments)
 
-	return len(deploymentList.Items), nil
+	return totalDeployments, nil
 }
 
 // Evaluates whether or not the deployment is using the specified DopplerSecret.
@@ -101,13 +133,30 @@ func (r *DopplerSecretReconciler) IsDeploymentUsingSecret(deployment v1.Deployme
 	return false
 }
 
+// IsDeploymentReferencingDopplerSecret checks if a deployment has an annotation directly referencing the DopplerSecret.
+// This enables restart support for deployments using CSI-mounted secrets.
+func (r *DopplerSecretReconciler) IsDeploymentReferencingDopplerSecret(deployment v1.Deployment, dopplerSecret secretsv1alpha1.DopplerSecret) bool {
+	return deployment.Annotations[deploymentDopplerSecretRefAnnotation] == dopplerSecret.GetNamespacedName()
+}
+
 // Reconciles a deployment with a Kubernetes secret
 // Specifically, if the Kubernetes secret version is different from the deployment's secret version annotation,
 // the annotation is updated to restart the deployment.
 func (r *DopplerSecretReconciler) ReconcileDeployment(ctx context.Context, deployment v1.Deployment, secret corev1.Secret) error {
-	log := r.Log.WithValues("deployment", fmt.Sprintf("%s/%s", deployment.Namespace, deployment.Name))
 	annotationKey := fmt.Sprintf("%s.%s", deploymentSecretUpdateAnnotationPrefix, secret.Name)
 	annotationValue := secret.Annotations[kubeSecretVersionAnnotation]
+	return r.reconcileDeploymentAnnotation(ctx, deployment, annotationKey, annotationValue)
+}
+
+// ReconcileDeploymentWithVersion reconciles a deployment using a version string directly.
+// Used when there is no managed Kubernetes secret (e.g. CSI-only mode).
+func (r *DopplerSecretReconciler) ReconcileDeploymentWithVersion(ctx context.Context, deployment v1.Deployment, dopplerSecretName string, version string) error {
+	annotationKey := fmt.Sprintf("%s.%s", deploymentSecretUpdateAnnotationPrefix, dopplerSecretName)
+	return r.reconcileDeploymentAnnotation(ctx, deployment, annotationKey, version)
+}
+
+func (r *DopplerSecretReconciler) reconcileDeploymentAnnotation(ctx context.Context, deployment v1.Deployment, annotationKey string, annotationValue string) error {
+	log := r.Log.WithValues("deployment", fmt.Sprintf("%s/%s", deployment.Namespace, deployment.Name))
 	if deployment.Annotations[annotationKey] == annotationValue &&
 		deployment.Spec.Template.Annotations[annotationKey] == annotationValue {
 		log.Info("[-] Deployment is already running latest version, nothing to do")

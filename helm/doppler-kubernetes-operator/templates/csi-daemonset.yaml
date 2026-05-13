@@ -1,0 +1,57 @@
+{{- if .Values.csiProvider.enabled }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "doppler-operator.fullname" . }}-csi-provider
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "doppler-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: csi-provider
+spec:
+  selector:
+    matchLabels:
+      app: {{ include "doppler-operator.fullname" . }}-csi-provider
+  template:
+    metadata:
+      labels:
+        app: {{ include "doppler-operator.fullname" . }}-csi-provider
+    spec:
+      serviceAccountName: {{ include "doppler-operator.fullname" . }}-csi-provider
+      containers:
+        - name: provider
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /csi-provider
+          args:
+            - "-socket-path=/var/run/secrets-store-csi-providers/doppler.sock"
+          # runAsUser: 0 is required to create the Unix socket in the
+          # root-owned hostPath directory at /var/run/secrets-store-csi-providers.
+          # This matches the AWS, GCP, Azure, and Vault CSI providers. All other
+          # capabilities are dropped and the root filesystem is read-only.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsUser: 0
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            {{- toYaml .Values.csiProvider.resources | nindent 12 }}
+          volumeMounts:
+            - name: provider-socket
+              mountPath: /var/run/secrets-store-csi-providers
+      volumes:
+        - name: provider-socket
+          hostPath:
+            path: /var/run/secrets-store-csi-providers
+            type: DirectoryOrCreate
+      {{- with .Values.csiProvider.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.csiProvider.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

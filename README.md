@@ -262,6 +262,14 @@ annotations:
 
 The Doppler Kubernetes operator reloads deployments by updating an annotation with the name `secrets.doppler.com/secretsupdate.<KUBERNETES_SECRET_NAME>`. When this update is made, Kubernetes will automatically redeploy your pods according to the [deployment's configured strategy](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy).
 
+Deployments that use the [CSI provider](#secrets-store-csi-driver-provider) instead of a managed Kubernetes secret can also be reloaded by adding an explicit reference to the `DopplerSecret`:
+
+```yaml
+annotations:
+  secrets.doppler.com/reload: 'true'
+  secrets.doppler.com/dopplersecret: doppler-operator-system/dopplersecret-test
+```
+
 ### Full Examples
 
 Complete examples of these different deployment configurations can be found below:
@@ -421,6 +429,131 @@ In some cases, the secret name or value stored in Doppler is not the format requ
 For example, you might have Base64-encoded TLS data that you want to copy to a native Kubernetes TLS secret (`kubernetes.io/tls`).
 
 You can use [custom types and processors](docs/custom_types_and_processors.md) to achieve this.
+
+## Secrets Store CSI Driver Provider
+
+As an alternative to syncing secrets into Kubernetes Secret resources, the Doppler CSI provider mounts secrets directly into pod volumes using the [Kubernetes Secrets Store CSI Driver](https://secrets-store-csi-driver.sigs.k8s.io/).
+
+### Prerequisites
+
+Install the Secrets Store CSI Driver in your cluster:
+
+```bash
+helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
+helm install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --namespace kube-system
+```
+
+### Enable the Doppler CSI Provider
+
+Install or upgrade the Doppler operator with the CSI provider enabled:
+
+```bash
+helm install doppler-operator doppler/doppler-kubernetes-operator --set csiProvider.enabled=true
+```
+
+### Create a Secret with your Doppler Token
+
+```bash
+kubectl create secret generic doppler-token-secret --from-literal=serviceToken=dp.st.dev.XXXX
+```
+
+### Create a SecretProviderClass
+
+```yaml
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: doppler-secrets
+spec:
+  provider: doppler
+  parameters:
+    project: "my-project"
+    config: "production"
+  secretObjects:
+    - secretName: my-synced-secret
+      type: Opaque
+      data:
+        - objectName: MY_SECRET
+          key: MY_SECRET
+```
+
+The `parameters` field supports the following options:
+
+| Parameter | Description | Default |
+| --------- | ----------- | ------- |
+| `project` | Doppler project (required) | |
+| `config` | Doppler config (required) | |
+| `host` | Doppler API host | `https://api.doppler.com` |
+| `nameTransformer` | Secret name transformer | |
+| `format` | Download format (`json`, `dotnet-json`, `env`, `yaml`) | |
+| `verifyTLS` | Whether to verify TLS | `true` |
+
+### Use in a Pod
+
+Mount the secrets as a volume in your pod spec:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-app
+spec:
+  serviceAccountName: default
+  containers:
+    - name: my-app
+      image: my-app:latest
+      volumeMounts:
+        - name: doppler-secrets
+          mountPath: /mnt/secrets
+          readOnly: true
+  volumes:
+    - name: doppler-secrets
+      csi:
+        driver: secrets-store.csi.k8s.io
+        readOnly: true
+        volumeAttributes:
+          secretProviderClass: doppler-secrets
+        nodePublishSecretRef:
+          name: doppler-token-secret
+```
+
+Each Doppler secret will be mounted as a file under `/mnt/secrets/`. The optional `secretObjects` field in the `SecretProviderClass` can also sync the mounted secrets into a native Kubernetes Secret.
+
+### Keeping Mounted Secrets Up to Date
+
+By default the Secrets Store CSI Driver mounts secrets once at pod start and does not refresh them. Install the driver with rotation enabled to periodically re-fetch values from Doppler and update the mounted files in place:
+
+```bash
+helm install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver \
+  --namespace kube-system \
+  --set enableSecretRotation=true \
+  --set rotationPollInterval=60s
+```
+
+Rotation updates the files on disk but does not restart the pod. For applications that read secrets once at startup, pair the CSI provider with the operator's reload annotations to also trigger a pod restart when secrets change. Create a `DopplerSecret` without a `managedSecret` (the operator will only poll for changes):
+
+```yaml
+apiVersion: secrets.doppler.com/v1alpha1
+kind: DopplerSecret
+metadata:
+  name: dopplersecret-test
+  namespace: doppler-operator-system
+spec:
+  tokenSecret:
+    name: doppler-token-secret
+  project: my-project
+  config: production
+```
+
+Then reference it from any deployment that should restart when secrets change:
+
+```yaml
+annotations:
+  secrets.doppler.com/reload: 'true'
+  secrets.doppler.com/dopplersecret: doppler-operator-system/dopplersecret-test
+```
+
+This delivers secrets directly to pods without ever creating a Kubernetes Secret in etcd, while preserving the auto-restart behavior of the managed-secret workflow.
 
 ## Failure Strategy and Troubleshooting
 

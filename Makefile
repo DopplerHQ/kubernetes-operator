@@ -96,8 +96,9 @@ test: manifests generate fmt vet ## Run tests.
 
 ##@ Build
 
-build: generate fmt vet ## Build manager binary.
+build: generate fmt vet ## Build manager and CSI provider binaries.
 	go build ${GO_BUILD_VERSION_FLAGS} -o bin/manager main.go
+	go build ${GO_BUILD_VERSION_FLAGS} -o bin/csi-provider ./cmd/csi-provider
 
 run: manifests generate fmt vet ## Run a controller from your host. Does not use VERSION flags.
 	POD_NAMESPACE=doppler-operator-system go run ./main.go

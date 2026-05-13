@@ -234,8 +234,9 @@ func (r *DopplerSecretReconciler) UpdateManagedSecret(ctx context.Context, secre
 	return nil
 }
 
-// UpdateSecret updates a Kubernetes secret using the configuration specified in a DopplerSecret
-func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecret secretsv1alpha1.DopplerSecret) error {
+// UpdateSecret updates a Kubernetes secret using the configuration specified in a DopplerSecret.
+// Returns the current secret version (ETag) for use in deployment reconciliation.
+func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecret secretsv1alpha1.DopplerSecret) (string, error) {
 	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName(), "verifyTLS", dopplerSecret.Spec.VerifyTLS, "host", dopplerSecret.Spec.Host)
 	if dopplerSecret.Spec.ManagedSecretRef.Namespace == "" {
 		dopplerSecret.Spec.ManagedSecretRef.Namespace = dopplerSecret.Namespace
@@ -248,12 +249,22 @@ func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecre
 
 	authProvider, err := r.getAuthProvider(ctx, &dopplerSecret)
 	if err != nil {
-		return fmt.Errorf("Failed to get auth provider: %w", err)
+		return "", fmt.Errorf("Failed to get auth provider: %w", err)
 	}
 
 	apiContext, err := authProvider.GetAPIContext(ctx)
 	if err != nil {
-		return fmt.Errorf("Failed to get API context: %w", err)
+		return "", fmt.Errorf("Failed to get API context: %w", err)
+	}
+
+	// If no managed secret is configured, just poll for changes (CSI-only mode)
+	if dopplerSecret.Spec.ManagedSecretRef.Name == "" {
+		log.Info("No managed secret configured, polling Doppler for changes")
+		secretsResult, apiErr := api.GetSecrets(*apiContext, "", dopplerSecret.Spec.Project, dopplerSecret.Spec.Config, dopplerSecret.Spec.NameTransformer, dopplerSecret.Spec.Format, dopplerSecret.Spec.Secrets)
+		if apiErr != nil {
+			return "", apiErr
+		}
+		return secretsResult.ETag, nil
 	}
 
 	managedSecretNamespacedName := types.NamespacedName{
@@ -262,15 +273,15 @@ func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecre
 	}
 	existingKubeSecret, err := r.GetReferencedSecret(ctx, managedSecretNamespacedName)
 	if err != nil && !errors.IsNotFound(err) {
-		return fmt.Errorf("Failed to fetch managed secret reference: %w", err)
+		return "", fmt.Errorf("Failed to fetch managed secret reference: %w", err)
 	}
 	if existingKubeSecret != nil && existingKubeSecret.Type != corev1.SecretType(dopplerSecret.Spec.ManagedSecretRef.Type) {
-		return fmt.Errorf("Cannot change existing managed secret type from %v to %v. Delete the managed secret and re-apply the DopplerSecret.", existingKubeSecret.Type, dopplerSecret.Spec.ManagedSecretRef.Type)
+		return "", fmt.Errorf("Cannot change existing managed secret type from %v to %v. Delete the managed secret and re-apply the DopplerSecret.", existingKubeSecret.Type, dopplerSecret.Spec.ManagedSecretRef.Type)
 	}
 
 	currentProcessorsVersion, err := GetProcessorsVersion(dopplerSecret.Spec.Processors)
 	if err != nil {
-		return fmt.Errorf("Failed to compute processors version: %w", err)
+		return "", fmt.Errorf("Failed to compute processors version: %w", err)
 	}
 
 	log.Info("Fetching Doppler secrets")
@@ -334,18 +345,18 @@ func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecre
 
 	secretsResult, apiErr := api.GetSecrets(*apiContext, requestedSecretVersion, dopplerSecret.Spec.Project, dopplerSecret.Spec.Config, dopplerSecret.Spec.NameTransformer, dopplerSecret.Spec.Format, dopplerSecret.Spec.Secrets)
 	if apiErr != nil {
-		return apiErr
+		return "", apiErr
 	}
 	if !secretsResult.Modified {
 		log.Info("[-] Doppler secrets not modified.")
-		return nil
+		return secretsResult.ETag, nil
 	}
 
 	log.Info("[/] Secrets have been modified", "oldVersion", secretVersion, "newVersion", secretsResult.ETag, "changes", changes)
 
 	if existingKubeSecret == nil {
-		return r.CreateManagedSecret(ctx, dopplerSecret, *secretsResult)
+		return secretsResult.ETag, r.CreateManagedSecret(ctx, dopplerSecret, *secretsResult)
 	} else {
-		return r.UpdateManagedSecret(ctx, *existingKubeSecret, dopplerSecret, *secretsResult)
+		return secretsResult.ETag, r.UpdateManagedSecret(ctx, *existingKubeSecret, dopplerSecret, *secretsResult)
 	}
 }

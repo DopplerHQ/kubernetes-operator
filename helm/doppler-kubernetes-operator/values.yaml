@@ -2,9 +2,10 @@
 namespace: doppler-operator-system
 
 ## Controller manager image
+## tag defaults to the chart's appVersion when not set
 image:
   repository: dopplerhq/kubernetes-operator
-  tag: latest
+  tag: ""
   pullPolicy: IfNotPresent
 
 ## Number of controller manager replicas
@@ -35,3 +36,19 @@ leaderElect: true
 serviceAccount:
   ## Annotations to add to the service account
   annotations: {}
+
+## Secrets Store CSI Driver provider (optional)
+## Uses the same image as the operator. Requires the Secrets Store CSI Driver
+## to be installed in the cluster.
+## See: https://secrets-store-csi-driver.sigs.k8s.io/getting-started/installation
+csiProvider:
+  enabled: false
+  resources:
+    limits:
+      cpu: 50m
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 128Mi
+  nodeSelector: {}
+  tolerations: []
