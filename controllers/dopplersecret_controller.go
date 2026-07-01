@@ -35,6 +35,9 @@ type DopplerSecretReconciler struct {
 	client.Client
 	Log    logr.Logger
 	Scheme *runtime.Scheme
+	// PollStates holds in-memory poll-first reconcile state keyed by DopplerSecret UID.
+	// Lazily initialized on first use so callers need not set it.
+	PollStates *pollStates
 }
 
 const (
@@ -113,6 +116,9 @@ func (r *DopplerSecretReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	if dopplerSecret.GetDeletionTimestamp() != nil {
 		log.Info("dopplersecret has been deleted, nothing to do")
+		// Drop any in-memory poll state for this resource so a later UID reuse can't
+		// inherit stale state. reset is a no-op on a nil receiver.
+		r.PollStates.reset(dopplerSecret.GetUID())
 		return ctrl.Result{}, nil
 	}
 

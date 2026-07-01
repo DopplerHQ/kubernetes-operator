@@ -32,8 +32,16 @@ func InitializeOIDCCache(log logr.Logger, cacheSize int) {
 }
 
 // Interface for different authentication methods
+//
+// GetAPIContext also returns the ResourceVersion of the token Secret it read (if any) to
+// build the returned APIContext, in the SAME call that produced the token. This lets callers
+// fold the ResourceVersion into an identity hash without a separate, independently-timed GET
+// of the same Secret: a credential rotation landing between two separate reads could otherwise
+// pair a token fetched under the OLD credential with a ResourceVersion fetched under the NEW
+// one (or vice versa), silently binding a stale poll etag to the wrong identity. Providers with
+// no backing token Secret (e.g. OIDC via spec-identity) return an empty string.
 type AuthProvider interface {
-	GetAPIContext(ctx context.Context) (*api.APIContext, error)
+	GetAPIContext(ctx context.Context) (*api.APIContext, string, error)
 }
 
 // Handle service token authentication
@@ -45,7 +53,7 @@ type ServiceTokenAuthProvider struct {
 	verifyTLS bool
 }
 
-func (s *ServiceTokenAuthProvider) GetAPIContext(ctx context.Context) (*api.APIContext, error) {
+func (s *ServiceTokenAuthProvider) GetAPIContext(ctx context.Context) (*api.APIContext, string, error) {
 	tokenSecret := corev1.Secret{}
 	tokenNamespace := s.namespace
 	if s.tokenRef.Namespace != "" {
@@ -57,40 +65,48 @@ func (s *ServiceTokenAuthProvider) GetAPIContext(ctx context.Context) (*api.APIC
 		Namespace: tokenNamespace,
 	}, &tokenSecret)
 	if err != nil {
-		return nil, fmt.Errorf("Unable to fetch token secret: %w", err)
+		return nil, "", fmt.Errorf("Unable to fetch token secret: %w", err)
 	}
 
 	serviceToken, ok := tokenSecret.Data["serviceToken"]
 	if !ok {
-		return nil, fmt.Errorf("Token secret does not contain 'serviceToken' field")
+		return nil, "", fmt.Errorf("Token secret does not contain 'serviceToken' field")
 	}
 
-	return &api.APIContext{
+	apiContext := &api.APIContext{
 		Host:      s.host,
 		APIKey:    string(serviceToken),
 		VerifyTLS: s.verifyTLS,
-	}, nil
+	}
+	// Same read that produced serviceToken above: RV and token are atomic with respect to
+	// each other.
+	return apiContext, tokenSecret.ResourceVersion, nil
 }
 
 // Handle OIDC authentication
 type OIDCAuthProvider struct {
-	oidcProvider *auth.OIDCAuthProvider
-	cacheKey     cache.Key
+	oidcProvider  *auth.OIDCAuthProvider
+	cacheKey      cache.Key
+	tokenSecretRV string
 }
 
-func (o *OIDCAuthProvider) GetAPIContext(ctx context.Context) (*api.APIContext, error) {
+func (o *OIDCAuthProvider) GetAPIContext(ctx context.Context) (*api.APIContext, string, error) {
 	token, err := o.oidcProvider.GetToken(ctx)
 	if err != nil {
 		// On error, remove from cache to force retry
 		oidcProviderCache.Remove(o.cacheKey)
-		return nil, fmt.Errorf("Unable to get OIDC token: %w", err)
+		return nil, "", fmt.Errorf("Unable to get OIDC token: %w", err)
 	}
 
-	return &api.APIContext{
+	apiContext := &api.APIContext{
 		Host:      o.oidcProvider.Host,
 		APIKey:    token,
 		VerifyTLS: o.oidcProvider.VerifyTLS,
-	}, nil
+	}
+	// tokenSecretRV was captured from the same token-secret-identity read done in
+	// getAuthProvider/createOIDCAuthProvider when this provider was constructed (empty for
+	// pure spec-identity OIDC, which has no backing token Secret).
+	return apiContext, o.tokenSecretRV, nil
 }
 
 // Determine which authentication provider to use
@@ -246,8 +262,17 @@ func (r *DopplerSecretReconciler) createOIDCAuthProvider(dopplerSecret *secretsv
 			"cacheKey", cacheKey)
 	}
 
+	// tokenSecretRV reflects the token Secret read for THIS reconcile call (by getAuthProvider,
+	// before createOIDCAuthProvider was invoked), not any state cached on oidcProvider itself
+	// (which may be reused across reconciles/rotations). Empty for pure spec-identity OIDC.
+	tokenSecretRV := ""
+	if tokenSecret != nil {
+		tokenSecretRV = tokenSecret.ResourceVersion
+	}
+
 	return &OIDCAuthProvider{
-		oidcProvider: oidcProvider,
-		cacheKey:     cacheKey,
+		oidcProvider:  oidcProvider,
+		cacheKey:      cacheKey,
+		tokenSecretRV: tokenSecretRV,
 	}, nil
 }
