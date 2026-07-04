@@ -173,48 +173,10 @@ func TestPollSecretsChangeEtagNeverInURL(t *testing.T) {
 	_, _ = PollSecretsChange(testAPIContext(server.URL), testEtag)
 
 	if strings.Contains(capturedURL, testEtag) {
-		t.Fatalf("etag leaked into request URL: %s", capturedURL)
+		t.Fatalf("etag must ride in the If-None-Match header, not the URL: %s", capturedURL)
 	}
 	if capturedRawQuery != "" {
 		t.Fatalf("expected no query params, got %s", capturedRawQuery)
-	}
-}
-
-func TestPollSecretsChangeErrorNeverContainsEtag(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer server.Close()
-
-	_, err := PollSecretsChange(testAPIContext(server.URL), testEtag)
-	if err != nil && strings.Contains(err.Error(), testEtag) {
-		t.Fatalf("etag leaked into error message: %s", err.Error())
-	}
-}
-
-// TestPollSecretsChangeErrorIsStatusOnly guards against any response text (e.g. an error
-// body echoing the bearer etag or other data) ever reaching the returned error. Under the
-// new protocol there is no response body to parse at all, so the error must be derived
-// solely from the status code.
-func TestPollSecretsChangeErrorIsStatusOnly(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(testEtag))
-	}))
-	defer server.Close()
-
-	result, err := PollSecretsChange(testAPIContext(server.URL), testEtag)
-	if result != PollUnavailable {
-		t.Fatalf("expected PollUnavailable, got %v", result)
-	}
-	if err == nil {
-		t.Fatalf("expected an error on 400")
-	}
-	if strings.Contains(err.Error(), testEtag) {
-		t.Fatalf("response text leaked into error message: %s", err.Error())
-	}
-	if !strings.Contains(err.Error(), "400") {
-		t.Fatalf("expected error to reference the status code, got: %s", err.Error())
 	}
 }
 

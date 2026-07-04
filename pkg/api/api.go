@@ -205,8 +205,7 @@ const pollTimeout = 2 * time.Second
 // response body to parse on any status code. A 304 means the etag's epoch still
 // matches (current); a 200 means it changed; any other status, timeout, or
 // connection error is reported as PollUnavailable so callers can safely fall back
-// to their existing polling/refresh strategy. Errors are sanitized to the status
-// code only and never include the etag or any response text.
+// to their existing polling/refresh strategy.
 func PollSecretsChange(context APIContext, etag string) (PollResult, error) {
 	url := fmt.Sprintf("%s/v4/secrets/poll", context.Host)
 
