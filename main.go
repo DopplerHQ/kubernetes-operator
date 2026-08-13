@@ -28,6 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/selection"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -55,16 +56,34 @@ func init() {
 	//+kubebuilder:scaffold:scheme
 }
 
-// managedSecretCacheRunnable makes a standalone cache satisfy controller-runtime's
+// secretCacheRunnable makes a standalone cache satisfy controller-runtime's
 // hasCache interface. Without GetCache the manager files a bare cache under its "Others"
 // runnable group with a no-op readiness check, so it never waits for the informer to sync
 // and never reports a cache that cannot sync. With it, the cache joins the Caches group
 // and startup blocks on WaitForCacheSync like the manager's own cache does.
-type managedSecretCacheRunnable struct {
+type secretCacheRunnable struct {
 	cache.Cache
 }
 
-func (c managedSecretCacheRunnable) GetCache() cache.Cache { return c.Cache }
+func (c secretCacheRunnable) GetCache() cache.Cache { return c.Cache }
+
+// cachedSecretSelector matches the only Secrets the operator needs in memory: the ones it
+// manages, and the token secrets it has been pointed at. Everything else in the cluster is
+// never listed or watched.
+var cachedSecretSelector = mustCachedSecretSelector()
+
+func mustCachedSecretSelector() labels.Selector {
+	requirement, err := labels.NewRequirement(
+		controllers.ManagedSecretLabelKey,
+		selection.In,
+		[]string{controllers.ManagedSecretLabelValue, controllers.TokenSecretLabelValue},
+	)
+	if err != nil {
+		// Only reachable if the label constants stop being valid label values.
+		panic(err)
+	}
+	return labels.NewSelector().Add(*requirement)
+}
 
 func main() {
 	var metricsAddr string
@@ -79,10 +98,15 @@ func main() {
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.IntVar(&oidcProviderCacheSize, "oidc-provider-cache-size", 2<<13, "Size of the OIDC provider cache. Set to 0 to disable caching.")
 	flag.BoolVar(&enableSecretCache, "enable-secret-cache", true,
-		"Cache the Kubernetes Secrets this operator manages, selected by the "+
-			"secrets.doppler.com/subtype=dopplerSecret label stamped on every managed secret. "+
-			"Secrets the operator does not manage are never cached. Set to false to disable "+
-			"Secret caching entirely, so every Secret read goes to the API server.")
+		"Cache the Kubernetes Secrets this operator uses: the ones it manages, and any "+
+			"token secrets labelled for it. Both are selected by the "+
+			"secrets.doppler.com/subtype label. The operator stamps that label on the "+
+			"managed secrets it creates. Token secrets belong to the user, so the operator "+
+			"never writes to them: caching one means labelling it yourself with "+
+			"secrets.doppler.com/subtype=dopplerToken, and an unlabelled token secret is "+
+			"read from the API server on every reconcile. Every other Secret in the cluster "+
+			"is never listed or watched. Set to false to disable Secret caching entirely, so "+
+			"every Secret read goes to the API server.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -120,18 +144,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	// A cache holding only our own managed secrets. Reads of them stay cached — which is
-	// what keeps reconciles cheap — while the cluster's other Secrets are never fetched.
-	// Token secrets are user-created and cannot carry our label, so they stay live reads.
-	var managedSecretReader client.Reader
+	// A cache holding only the secrets this operator touches: the ones it manages, and
+	// the token secrets it has been pointed at. Reads of both stay cached, which is what
+	// keeps reconciles cheap, while the cluster's other Secrets are never fetched.
+	var cachedSecretReader client.Reader
 	if enableSecretCache {
-		setupLog.Info("Caching managed secrets only",
-			"selector", controllers.ManagedSecretLabelKey+"="+controllers.ManagedSecretLabelValue)
-		managedSecretCache, cacheErr := cache.New(restCfg, cache.Options{
+		setupLog.Info("Caching only the secrets this operator uses", "selector", cachedSecretSelector.String())
+		secretCache, err := cache.New(restCfg, cache.Options{
 			Scheme: scheme,
 			ByObject: map[client.Object]cache.ByObject{
 				&corev1.Secret{}: {
-					Label:     labels.SelectorFromSet(labels.Set{controllers.ManagedSecretLabelKey: controllers.ManagedSecretLabelValue}),
+					Label:     cachedSecretSelector,
 					Transform: cache.TransformStripManagedFields(),
 				},
 			},
@@ -139,29 +162,29 @@ func main() {
 			// quietly start an unfiltered informer for it.
 			ReaderFailOnMissingInformer: true,
 		})
-		if cacheErr != nil {
-			setupLog.Error(cacheErr, "unable to build managed secret cache")
+		if err != nil {
+			setupLog.Error(err, "unable to build secret cache")
 			os.Exit(1)
 		}
-		if _, err := managedSecretCache.GetInformer(context.Background(), &corev1.Secret{}); err != nil {
-			setupLog.Error(err, "unable to start managed secret informer")
+		if _, err := secretCache.GetInformer(context.Background(), &corev1.Secret{}); err != nil {
+			setupLog.Error(err, "unable to start secret cache informer")
 			os.Exit(1)
 		}
-		if err := mgr.Add(managedSecretCacheRunnable{managedSecretCache}); err != nil {
-			setupLog.Error(err, "unable to add managed secret cache to manager")
+		if err := mgr.Add(secretCacheRunnable{secretCache}); err != nil {
+			setupLog.Error(err, "unable to add secret cache to manager")
 			os.Exit(1)
 		}
-		managedSecretReader = managedSecretCache
+		cachedSecretReader = secretCache
 	} else {
 		setupLog.Info("Secret caching disabled; all Secret reads go to the API server")
 	}
 
 	if err = (&controllers.DopplerSecretReconciler{
-		Client:              mgr.GetClient(),
-		Log:                 log,
-		Scheme:              mgr.GetScheme(),
-		ManagedSecretReader: managedSecretReader,
-		APIReader:           mgr.GetAPIReader(),
+		Client:             mgr.GetClient(),
+		Log:                log,
+		Scheme:             mgr.GetScheme(),
+		CachedSecretReader: cachedSecretReader,
+		APIReader:          mgr.GetAPIReader(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "DopplerSecret")
 		os.Exit(1)
