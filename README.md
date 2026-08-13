@@ -77,13 +77,19 @@ Generate a Doppler Service Token and create a secret:
 
 ```bash
 kubectl create secret generic doppler-token-secret -n doppler-operator-system --from-literal=serviceToken=dp.st.dev.XXXX
+kubectl label secret doppler-token-secret -n doppler-operator-system secrets.doppler.com/subtype=dopplerToken
 ```
 
 If you have the Doppler CLI installed, you can generate a Doppler Service Token from the CLI and create the Doppler token secret in one step:
 
 ```bash
 kubectl create secret generic doppler-token-secret -n doppler-operator-system --from-literal=serviceToken=$(doppler configs tokens create doppler-kubernetes-operator --project example-project --config prd --plain)
+kubectl label secret doppler-token-secret -n doppler-operator-system secrets.doppler.com/subtype=dopplerToken
 ```
+
+The `secrets.doppler.com/subtype=dopplerToken` label is optional. It lets the operator cache
+this secret instead of reading it from the Kubernetes API on every sync. See
+[Token Secret Caching](#token-secret-caching).
 
 #### Option 2: OIDC Authentication
 
@@ -98,6 +104,7 @@ Either create a secret containing your identity:
 
 ```bash
 kubectl create secret generic doppler-token-secret -n doppler-operator-system --from-literal=identity=YOUR_IDENTITY_ID
+kubectl label secret doppler-token-secret -n doppler-operator-system secrets.doppler.com/subtype=dopplerToken
 ```
 
 Or include the identity directly in the DopplerSecret spec (see Service Account Identity example below).
@@ -385,6 +392,48 @@ In some cases, the secret name or value stored in Doppler is not the format requ
 For example, you might have Base64-encoded TLS data that you want to copy to a native Kubernetes TLS secret (`kubernetes.io/tls`).
 
 You can use [custom types and processors](docs/custom_types_and_processors.md) to achieve this.
+
+## Token Secret Caching
+
+The operator holds only the Kubernetes Secrets it needs in memory: the managed secrets it
+writes, and any token secrets you have opted in. It doesn't list or watch any other Secret,
+so its memory doesn't grow with the number of Secrets in the cluster.
+
+Managed secrets are opted in automatically: the operator labels them
+`secrets.doppler.com/subtype=dopplerSecret` when it creates them. Token secrets are yours, so
+the operator doesn't modify them. To opt one in, add the label yourself:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: doppler-token-secret
+  namespace: doppler-operator-system
+  labels:
+    secrets.doppler.com/subtype: dopplerToken
+type: Opaque
+stringData:
+  serviceToken: dp.st.dev.XXXX
+```
+
+Or on a secret that already exists:
+
+```bash
+kubectl label secret doppler-token-secret -n doppler-operator-system secrets.doppler.com/subtype=dopplerToken
+```
+
+The label is optional. Without it, the operator reads the token secret from the Kubernetes
+API once per sync per `DopplerSecret`. That's one extra API call, which only matters if you
+run many hundreds of `DopplerSecret` resources. Nothing else changes. The operator logs a
+one-line reminder the first time it reads an unlabelled token secret.
+
+The operator doesn't apply this label for you, because writing to a Secret it doesn't own
+would conflict with whatever does own it: Terraform and Argo CD would report the label as
+configuration drift, and Flux would revert it on the next reconcile.
+
+To turn off Secret caching entirely, start the operator with `--enable-secret-cache=false`.
+It then reads every Secret from the API server and caches none, which uses slightly less
+memory in exchange for more API calls.
 
 ## Failure Strategy and Troubleshooting
 

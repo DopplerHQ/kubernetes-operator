@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -36,14 +37,15 @@ type DopplerSecretReconciler struct {
 	Log    logr.Logger
 	Scheme *runtime.Scheme
 
-	// ManagedSecretReader reads secrets from a cache restricted to those carrying the
-	// managed-secret label. Nil when Secret caching is disabled entirely, in which case
-	// reads fall back to Client, which never caches Secrets.
-	ManagedSecretReader client.Reader
+	// CachedSecretReader reads from a cache holding only managed secrets and opted-in
+	// token secrets. Nil when Secret caching is disabled.
+	CachedSecretReader client.Reader
 
-	// APIReader bypasses all caches. Used to confirm a managed secret really is absent
-	// before creating it, since a label-filtered cache cannot see unlabelled secrets.
+	// APIReader bypasses all caches. Used to confirm a cache miss.
 	APIReader client.Reader
+
+	// uncachedTokenSecrets records the token secrets the opt-in hint has been logged for.
+	uncachedTokenSecrets sync.Map
 }
 
 const (
