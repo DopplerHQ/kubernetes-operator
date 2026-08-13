@@ -45,6 +45,10 @@ const (
 	kubeSecretManagedByAnnotation         = "secrets.doppler.com/managed-by"
 	kubeSecretLastUpdatedAnnotation       = "secrets.doppler.com/last-updated"
 	kubeSecretServiceTokenKey             = "serviceToken"
+
+	// Stamped on every managed secret since v0.0.6. The filtered Secret cache selects on it.
+	SubtypeLabelKey         = "secrets.doppler.com/subtype"
+	ManagedSecretLabelValue = "dopplerSecret"
 )
 
 var kubeSecretBuiltInAnnotationKeys = []string{kubeSecretVersionAnnotation, kubeSecretProcessorsVersionAnnotation, kubeSecretFormatVersionAnnotation, kubeSecretDashboardLinkAnnotaion, kubeSecretManagedByAnnotation, kubeSecretLastUpdatedAnnotation}
@@ -74,6 +78,31 @@ func (r *DopplerSecretReconciler) GetReferencedSecret(ctx context.Context, names
 		existingKubeSecret = nil
 	}
 	return existingKubeSecret, err
+}
+
+// GetManagedSecret gets a secret this operator manages, preferring the filtered cache.
+//
+// The cache cannot see a secret without our label, such as one a user created and pointed
+// a DopplerSecret at for adoption. A miss or any other cache error is confirmed against
+// the API server, or the operator would try to Create a secret that already exists.
+func (r *DopplerSecretReconciler) GetManagedSecret(ctx context.Context, namespacedName types.NamespacedName) (*corev1.Secret, error) {
+	if r.ManagedSecretReader == nil || r.APIReader == nil {
+		return r.GetReferencedSecret(ctx, namespacedName)
+	}
+
+	kubeSecret := &corev1.Secret{}
+	err := r.ManagedSecretReader.Get(ctx, namespacedName, kubeSecret)
+	if err == nil {
+		return kubeSecret, nil
+	}
+	if !errors.IsNotFound(err) {
+		r.Log.Error(err, "Secret cache read failed, falling back to the API server",
+			"secret", namespacedName.String())
+	}
+	if err := r.APIReader.Get(ctx, namespacedName, kubeSecret); err != nil {
+		return nil, err
+	}
+	return kubeSecret, nil
 }
 
 // GetDopplerToken gets the Doppler Service Token referenced by the DopplerSecret
@@ -160,7 +189,7 @@ func GetKubeSecretLabels(additionalLabels map[string]string) map[string]string {
 		labels[k] = v
 	}
 
-	labels["secrets.doppler.com/subtype"] = "dopplerSecret"
+	labels[SubtypeLabelKey] = ManagedSecretLabelValue
 
 	return labels
 }
@@ -260,7 +289,7 @@ func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecre
 		Name:      dopplerSecret.Spec.ManagedSecretRef.Name,
 		Namespace: dopplerSecret.Spec.ManagedSecretRef.Namespace,
 	}
-	existingKubeSecret, err := r.GetReferencedSecret(ctx, managedSecretNamespacedName)
+	existingKubeSecret, err := r.GetManagedSecret(ctx, managedSecretNamespacedName)
 	if err != nil && !errors.IsNotFound(err) {
 		return fmt.Errorf("Failed to fetch managed secret reference: %w", err)
 	}
