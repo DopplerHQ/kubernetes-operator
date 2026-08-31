@@ -27,6 +27,7 @@ import (
 
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -61,6 +62,11 @@ func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Co
 	deploymentList := &v1.DeploymentList{}
 	err := r.Client.List(listCtx, deploymentList, &client.ListOptions{Namespace: namespace})
 	if err != nil {
+		if apierrors.IsTimeout(err) || errors.Is(err, context.DeadlineExceeded) {
+			err = fmt.Errorf("%w (the Deployment cache did not sync within %s: the operator needs list and watch "+
+				"on apps/deployments at cluster scope, which a namespaced RoleBinding does not grant)",
+				err, deploymentListTimeout)
+		}
 		return 0, fmt.Errorf("Unable to fetch deployments: %w", err)
 	}
 	kubeSecretNamespacedName := types.NamespacedName{
@@ -125,8 +131,13 @@ func aggregateDeploymentFailures(failures []deploymentFailure, numMatched int) e
 		quoted = append(quoted, fmt.Errorf("%s: %w", failure.name, failure.err))
 	}
 
-	return fmt.Errorf("Failed to reconcile %d of %d deployments using this secret%s: %w",
-		len(failures), numMatched, omitted, errors.Join(quoted...))
+	remedy := ""
+	if slices.ContainsFunc(failures, func(f deploymentFailure) bool { return apierrors.IsForbidden(f.err) }) {
+		remedy = "; the operator needs update on apps/deployments in this namespace"
+	}
+
+	return fmt.Errorf("Failed to reconcile %d of %d deployments using this secret%s%s: %w",
+		len(failures), numMatched, omitted, remedy, errors.Join(quoted...))
 }
 
 // Evaluates whether or not the deployment is using the specified DopplerSecret.
