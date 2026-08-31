@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -43,6 +44,13 @@ const (
 	maxReportedDeploymentErrors = 3
 )
 
+// deploymentListTimeout bounds the cached Deployment read. It only takes effect when the
+// informer behind that read has not synced: a synced cache answers from memory in well under
+// a millisecond. Long enough that an informer still filling on a large cluster is not cut off
+// - it requeues and succeeds on a later pass - and short enough that a cache which will never
+// sync does not hold the reconcile worker. A variable so tests can shorten it.
+var deploymentListTimeout = 30 * time.Second
+
 // Reconciles deployments marked with the restart annotation and that use the specified DopplerSecret.
 func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Context, dopplerSecret secretsv1alpha1.DopplerSecret) (int, error) {
 	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName())
@@ -50,8 +58,18 @@ func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Co
 	if dopplerSecret.Spec.ManagedSecretRef.Namespace != "" {
 		namespace = dopplerSecret.Spec.ManagedSecretRef.Namespace
 	}
+	// This List is served by a cluster-wide Deployment informer that is started lazily, on
+	// the first call. If that informer cannot sync - the deployments watch being denied, for
+	// instance - the read waits for as long as its context allows, and a reconcile context
+	// has no deadline of its own. Without a bound here the call never returns: the single
+	// reconcile worker is held indefinitely, so no DopplerSecret is reconciled, and because
+	// the reload condition is only written once this returns, every DopplerSecret keeps
+	// reporting whatever it last said. A deadline turns an unsyncable cache into an error
+	// that reaches the status and requeues, instead of a silent stall.
+	listCtx, cancelList := context.WithTimeout(ctx, deploymentListTimeout)
+	defer cancelList()
 	deploymentList := &v1.DeploymentList{}
-	err := r.Client.List(ctx, deploymentList, &client.ListOptions{Namespace: namespace})
+	err := r.Client.List(listCtx, deploymentList, &client.ListOptions{Namespace: namespace})
 	if err != nil {
 		return 0, fmt.Errorf("Unable to fetch deployments: %w", err)
 	}
