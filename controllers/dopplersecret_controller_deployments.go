@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -40,6 +41,11 @@ const (
 	maxReportedDeploymentErrors = 3
 )
 
+// deploymentListTimeout bounds the cached Deployment List. A synced cache answers from
+// memory, so this only matters when the informer cannot sync. A variable so tests can
+// shorten it.
+var deploymentListTimeout = 30 * time.Second
+
 // Reconciles deployments marked with the restart annotation and that use the specified DopplerSecret.
 func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Context, dopplerSecret secretsv1alpha1.DopplerSecret) (int, error) {
 	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName())
@@ -47,8 +53,13 @@ func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Co
 	if dopplerSecret.Spec.ManagedSecretRef.Namespace != "" {
 		namespace = dopplerSecret.Spec.ManagedSecretRef.Namespace
 	}
+	// The List waits for the cluster-wide Deployment informer to sync, and a reconcile
+	// context has no deadline. Without a bound, an informer that never syncs holds the
+	// reconcile worker forever.
+	listCtx, cancelList := context.WithTimeout(ctx, deploymentListTimeout)
+	defer cancelList()
 	deploymentList := &v1.DeploymentList{}
-	err := r.Client.List(ctx, deploymentList, &client.ListOptions{Namespace: namespace})
+	err := r.Client.List(listCtx, deploymentList, &client.ListOptions{Namespace: namespace})
 	if err != nil {
 		return 0, fmt.Errorf("Unable to fetch deployments: %w", err)
 	}

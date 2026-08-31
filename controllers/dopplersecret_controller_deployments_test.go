@@ -2,9 +2,11 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	v1 "k8s.io/api/apps/v1"
@@ -192,5 +194,85 @@ func TestAggregateDeploymentFailuresIsCappedAndDeterministic(t *testing.T) {
 func TestAggregateDeploymentFailuresNilWhenEmpty(t *testing.T) {
 	if err := aggregateDeploymentFailures(nil, 3); err != nil {
 		t.Errorf("expected nil for no failures, got: %v", err)
+	}
+}
+
+// listReconciler builds a reconciler whose Deployment List is handled by listFn, standing in
+// for the cached read.
+func listReconciler(t *testing.T, listFn func(context.Context) error) *DopplerSecretReconciler {
+	t.Helper()
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
+		Name:      "creds",
+		Namespace: "app",
+		Labels:    map[string]string{SubtypeLabelKey: ManagedSecretLabelValue},
+	}}
+
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(secret).
+		WithInterceptorFuncs(interceptor.Funcs{
+			List: func(ctx context.Context, _ client.WithWatch, _ client.ObjectList,
+				_ ...client.ListOption) error {
+				return listFn(ctx)
+			},
+		}).Build()
+
+	return &DopplerSecretReconciler{Client: c, Log: logr.Discard()}
+}
+
+func TestReconcileDeploymentsBoundsTheCachedList(t *testing.T) {
+	var (
+		sawDeadline bool
+		budget      time.Duration
+	)
+	r := listReconciler(t, func(ctx context.Context) error {
+		deadline, ok := ctx.Deadline()
+		sawDeadline = ok
+		if ok {
+			budget = time.Until(deadline)
+		}
+		return nil
+	})
+
+	if _, err := r.ReconcileDeploymentsUsingSecret(context.Background(), reloadDopplerSecret()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !sawDeadline {
+		t.Fatal("the cached deployment List was given a context with no deadline")
+	}
+	if budget <= 0 || budget > deploymentListTimeout {
+		t.Errorf("deadline should be within deploymentListTimeout (%v), got %v", deploymentListTimeout, budget)
+	}
+}
+
+// An informer that never syncs, under a reconcile context with no deadline of its own,
+// must produce an error rather than block.
+func TestReconcileDeploymentsReturnsWhenTheCacheNeverSyncs(t *testing.T) {
+	original := deploymentListTimeout
+	deploymentListTimeout = 150 * time.Millisecond
+	defer func() { deploymentListTimeout = original }()
+
+	r := listReconciler(t, func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := r.ReconcileDeploymentsUsingSecret(context.Background(), reloadDopplerSecret())
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("an unsyncable cache must produce an error")
+		}
+		if !strings.Contains(err.Error(), "Unable to fetch deployments") {
+			t.Errorf("error should identify the failing read, got: %v", err)
+		}
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("error should wrap the deadline, got: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("ReconcileDeploymentsUsingSecret did not return")
 	}
 }
