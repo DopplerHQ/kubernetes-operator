@@ -27,6 +27,7 @@ import (
 
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -125,8 +126,13 @@ func aggregateDeploymentFailures(failures []deploymentFailure, numMatched int) e
 		quoted = append(quoted, fmt.Errorf("%s: %w", failure.name, failure.err))
 	}
 
-	return fmt.Errorf("Failed to reconcile %d of %d deployments using this secret%s: %w",
-		len(failures), numMatched, omitted, errors.Join(quoted...))
+	remedy := ""
+	if slices.ContainsFunc(failures, func(f deploymentFailure) bool { return apierrors.IsForbidden(f.err) }) {
+		remedy = "; the operator needs update on apps/deployments in this namespace"
+	}
+
+	return fmt.Errorf("Failed to reconcile %d of %d deployments using this secret%s%s: %w",
+		len(failures), numMatched, omitted, remedy, errors.Join(quoted...))
 }
 
 // Evaluates whether or not the deployment is using the specified DopplerSecret.

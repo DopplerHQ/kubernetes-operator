@@ -276,3 +276,29 @@ func TestReconcileDeploymentsReturnsWhenTheCacheNeverSyncs(t *testing.T) {
 		t.Fatal("ReconcileDeploymentsUsingSecret did not return")
 	}
 }
+
+func TestAggregateDeploymentFailuresExplainsARefusedWrite(t *testing.T) {
+	failures := []deploymentFailure{
+		{name: "web", err: forbiddenUpdate("web")},
+		{name: "api", err: forbiddenUpdate("api")},
+	}
+
+	got := aggregateDeploymentFailures(failures, 2).Error()
+
+	if n := strings.Count(got, "needs update on apps/deployments"); n != 1 {
+		t.Errorf("expected the remedy once, got %d in: %v", n, got)
+	}
+}
+
+func TestAggregateDeploymentFailuresOmitsRemedyForOtherErrors(t *testing.T) {
+	failures := []deploymentFailure{
+		{name: "web", err: apierrors.NewConflict(
+			schema.GroupResource{Group: "apps", Resource: "deployments"}, "web", errors.New("object modified"))},
+	}
+
+	got := aggregateDeploymentFailures(failures, 1).Error()
+
+	if strings.Contains(got, "update on apps/deployments") {
+		t.Errorf("a conflict is not an RBAC problem, got: %v", got)
+	}
+}
