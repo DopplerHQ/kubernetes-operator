@@ -18,7 +18,10 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 
 	v1 "k8s.io/api/apps/v1"
@@ -32,6 +35,9 @@ import (
 const (
 	deploymentSecretUpdateAnnotationPrefix = "secrets.doppler.com/secretsupdate"
 	deploymentRestartAnnotation            = "secrets.doppler.com/reload"
+
+	// maxReportedDeploymentErrors caps how many failures are quoted in the status message.
+	maxReportedDeploymentErrors = 3
 )
 
 // Reconciles deployments marked with the restart annotation and that use the specified DopplerSecret.
@@ -55,15 +61,21 @@ func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Co
 		return 0, fmt.Errorf("Unable to fetch Kubernetes secret to update deployment: %w", err)
 	}
 	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var failures []deploymentFailure
+	numMatched := 0
 	for _, deployment := range deploymentList.Items {
 		if deployment.Annotations[deploymentRestartAnnotation] == "true" && r.IsDeploymentUsingSecret(deployment, dopplerSecret) {
+			numMatched++
 			wg.Add(1)
 			go func(deployment v1.Deployment, kubeSecret corev1.Secret, wg *sync.WaitGroup) {
 				defer wg.Done()
 				err := r.ReconcileDeployment(ctx, deployment, kubeSecret)
 				if err != nil {
-					// Errors reconciling deployments are logged but not propagated up. Failed deployments will be reconciled on the next run.
 					log.Error(err, "Unable to reconcile deployment")
+					mu.Lock()
+					defer mu.Unlock()
+					failures = append(failures, deploymentFailure{name: deployment.Name, err: err})
 				}
 			}(deployment, *kubeSecret, &wg)
 		}
@@ -72,7 +84,38 @@ func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Co
 
 	log.Info("Finished reconciling deployments", "numDeployments", len(deploymentList.Items))
 
-	return len(deploymentList.Items), nil
+	// Returned so DeploymentReloadReady does not report success while deployments go unreloaded.
+	return len(deploymentList.Items), aggregateDeploymentFailures(failures, numMatched)
+}
+
+// deploymentFailure pairs a reconcile error with the deployment it came from.
+type deploymentFailure struct {
+	name string
+	err  error
+}
+
+// aggregateDeploymentFailures folds per-deployment errors into one error, sorted by name so
+// the status message is stable across reconciles.
+func aggregateDeploymentFailures(failures []deploymentFailure, numMatched int) error {
+	if len(failures) == 0 {
+		return nil
+	}
+
+	slices.SortFunc(failures, func(a, b deploymentFailure) int {
+		return strings.Compare(a.name, b.name)
+	})
+
+	omitted := ""
+	if len(failures) > maxReportedDeploymentErrors {
+		omitted = fmt.Sprintf(" (%d more not shown)", len(failures)-maxReportedDeploymentErrors)
+	}
+	quoted := []error{}
+	for _, failure := range failures[:min(len(failures), maxReportedDeploymentErrors)] {
+		quoted = append(quoted, fmt.Errorf("%s: %w", failure.name, failure.err))
+	}
+
+	return fmt.Errorf("Failed to reconcile %d of %d deployments using this secret%s: %w",
+		len(failures), numMatched, omitted, errors.Join(quoted...))
 }
 
 // Evaluates whether or not the deployment is using the specified DopplerSecret.
