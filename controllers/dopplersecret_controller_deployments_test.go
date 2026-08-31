@@ -276,3 +276,61 @@ func TestReconcileDeploymentsReturnsWhenTheCacheNeverSyncs(t *testing.T) {
 		t.Fatal("ReconcileDeploymentsUsingSecret did not return")
 	}
 }
+
+func TestReconcileDeploymentsExplainsACacheSyncTimeout(t *testing.T) {
+	r := listReconciler(t, func(context.Context) error {
+		return apierrors.NewTimeoutError("failed waiting for *v1.Deployment Informer to sync", 0)
+	})
+
+	_, err := r.ReconcileDeploymentsUsingSecret(context.Background(), reloadDopplerSecret())
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "list and watch on apps/deployments at cluster scope") {
+		t.Errorf("expected the RBAC hint, got: %v", err)
+	}
+	if !apierrors.IsTimeout(err) {
+		t.Errorf("the timeout should stay detectable through the wrapper: %v", err)
+	}
+}
+
+func TestReconcileDeploymentsLeavesOtherListErrorsAlone(t *testing.T) {
+	r := listReconciler(t, func(context.Context) error {
+		return apierrors.NewForbidden(schema.GroupResource{Group: "apps", Resource: "deployments"}, "",
+			errors.New("cannot list"))
+	})
+
+	_, err := r.ReconcileDeploymentsUsingSecret(context.Background(), reloadDopplerSecret())
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if strings.Contains(err.Error(), "did not sync") {
+		t.Errorf("a non-timeout error should not get the sync hint, got: %v", err)
+	}
+}
+
+func TestAggregateDeploymentFailuresExplainsARefusedWrite(t *testing.T) {
+	failures := []deploymentFailure{
+		{name: "web", err: forbiddenUpdate("web")},
+		{name: "api", err: forbiddenUpdate("api")},
+	}
+
+	got := aggregateDeploymentFailures(failures, 2).Error()
+
+	if n := strings.Count(got, "needs update on apps/deployments"); n != 1 {
+		t.Errorf("expected the remedy once, got %d in: %v", n, got)
+	}
+}
+
+func TestAggregateDeploymentFailuresOmitsRemedyForOtherErrors(t *testing.T) {
+	failures := []deploymentFailure{
+		{name: "web", err: apierrors.NewConflict(
+			schema.GroupResource{Group: "apps", Resource: "deployments"}, "web", errors.New("object modified"))},
+	}
+
+	got := aggregateDeploymentFailures(failures, 1).Error()
+
+	if strings.Contains(got, "update on apps/deployments") {
+		t.Errorf("a conflict is not an RBAC problem, got: %v", got)
+	}
+}
