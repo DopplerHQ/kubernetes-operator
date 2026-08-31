@@ -24,6 +24,8 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - command:
         - /manager
@@ -37,7 +39,9 @@ spec:
           runAsNonRoot: true
           capabilities:
             drop:
-              - NET_RAW
+              - ALL
+          seccompProfile:
+            type: RuntimeDefault
         livenessProbe:
           httpGet:
             path: /healthz
