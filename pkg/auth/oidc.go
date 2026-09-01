@@ -35,7 +35,6 @@ type OIDCAuthProvider struct {
 	tokenExpiry time.Time
 }
 
-
 // Returns a Doppler API token, refreshing if necessary
 func (o *OIDCAuthProvider) GetToken(ctx context.Context) (string, error) {
 	o.rwm.RLock()
@@ -128,6 +127,9 @@ func (o *OIDCAuthProvider) exchangeTokenWithDoppler(ctx context.Context, saToken
 
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{
+			// #nosec G402 -- verification is disabled only when a DopplerSecret sets
+			// verifyTLS: false. The field defaults to true, and exists for on-prem
+			// endpoints presenting certificates the cluster does not trust.
 			InsecureSkipVerify: !o.VerifyTLS,
 		},
 	}
