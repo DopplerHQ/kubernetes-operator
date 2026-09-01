@@ -23,9 +23,11 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -43,6 +45,18 @@ const (
 	maxReportedDeploymentErrors = 3
 )
 
+// deploymentListTimeout bounds the cached Deployment read. It only takes effect when the
+// informer behind that read has not synced: a synced cache answers from memory in well under
+// a millisecond. Long enough that an informer still filling on a large cluster is not cut off
+// - it requeues and succeeds on a later pass - and short enough that a cache which will never
+// sync does not hold the reconcile worker. A variable so tests can shorten it.
+var deploymentListTimeout = 30 * time.Second
+
+// deploymentProbeTimeout bounds the single uncached read used to explain a cache sync
+// timeout. Short, because it runs on a path that has already spent deploymentListTimeout and
+// its only job is to tell an authorization failure apart from a slow sync.
+var deploymentProbeTimeout = 10 * time.Second
+
 // Reconciles deployments marked with the restart annotation and that use the specified DopplerSecret.
 func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Context, dopplerSecret secretsv1alpha1.DopplerSecret) (int, error) {
 	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName())
@@ -50,10 +64,20 @@ func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Co
 	if dopplerSecret.Spec.ManagedSecretRef.Namespace != "" {
 		namespace = dopplerSecret.Spec.ManagedSecretRef.Namespace
 	}
+	// This List is served by a cluster-wide Deployment informer that is started lazily, on
+	// the first call. If that informer cannot sync - the deployments watch being denied, for
+	// instance - the read waits for as long as its context allows, and a reconcile context
+	// has no deadline of its own. Without a bound here the call never returns: the single
+	// reconcile worker is held indefinitely, so no DopplerSecret is reconciled, and because
+	// the reload condition is only written once this returns, every DopplerSecret keeps
+	// reporting whatever it last said. A deadline turns an unsyncable cache into an error
+	// that reaches the status and requeues, instead of a silent stall.
+	listCtx, cancelList := context.WithTimeout(ctx, deploymentListTimeout)
+	defer cancelList()
 	deploymentList := &v1.DeploymentList{}
-	err := r.Client.List(ctx, deploymentList, &client.ListOptions{Namespace: namespace})
+	err := r.Client.List(listCtx, deploymentList, &client.ListOptions{Namespace: namespace})
 	if err != nil {
-		return 0, fmt.Errorf("Unable to fetch deployments: %w", err)
+		return 0, fmt.Errorf("Unable to fetch deployments: %w", r.explainCacheSyncFailure(ctx, namespace, err))
 	}
 	kubeSecretNamespacedName := types.NamespacedName{
 		Namespace: namespace,
@@ -90,8 +114,45 @@ func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Co
 	// Per-deployment failures are aggregated into the returned error rather than only logged.
 	// DeploymentReloadReady is derived from it, so dropping them would leave that condition
 	// reporting success while annotated deployments never restart - which is how a ClusterRole
-	// without the deployments patch verb presents. Returning the error also requeues.
+	// missing update on apps/deployments presents. Returning the error also requeues.
 	return len(deploymentList.Items), aggregateDeploymentFailures(failures, numMatched)
+}
+
+// explainCacheSyncFailure adds why to a cached read that timed out.
+//
+// On its own, controller-runtime reports "failed waiting for *v1.Deployment Informer to
+// sync", which names no cause. Three quite different situations produce it: the informer's
+// list or watch is refused, the initial sync is genuinely still running on a very large
+// cluster, or a proxy is dropping the watch bookmark that ends a streaming list.
+//
+// One uncached read separates them. If that read is refused too, the API server's reply names
+// the verb and identity it objected to, which is the answer. If it succeeds, the operator can
+// reach Deployments and the fault is specific to what the informer needs beyond a plain read:
+// cluster-scoped list and watch.
+func (r *DopplerSecretReconciler) explainCacheSyncFailure(ctx context.Context, namespace string, cause error) error {
+	// Only a sync timeout is ambiguous. Anything else already says what went wrong.
+	if !apierrors.IsTimeout(cause) && !errors.Is(cause, context.DeadlineExceeded) {
+		return cause
+	}
+	if r.APIReader == nil {
+		return cause
+	}
+
+	probeCtx, cancelProbe := context.WithTimeout(ctx, deploymentProbeTimeout)
+	defer cancelProbe()
+	// Limit 1: this asks whether the read is permitted, not for the contents.
+	probeErr := r.APIReader.List(probeCtx, &v1.DeploymentList{},
+		&client.ListOptions{Namespace: namespace, Limit: 1})
+	if probeErr != nil {
+		return fmt.Errorf("%w (the Deployment cache did not sync within %s, and reading Deployments directly failed too: %v)",
+			cause, deploymentListTimeout, probeErr)
+	}
+
+	return fmt.Errorf("%w (the Deployment cache did not sync within %s, though reading Deployments in %s directly succeeded. "+
+		"The cache lists and watches Deployments in every namespace, so the operator needs list and watch on apps/deployments "+
+		"at cluster scope - a namespaced RoleBinding does not cover it. A very large number of Deployments, or a proxy that "+
+		"drops watch bookmarks, can also delay this sync)",
+		cause, deploymentListTimeout, namespace)
 }
 
 // deploymentFailure records which deployment a reconcile error came from, so the aggregate
@@ -128,12 +189,24 @@ func aggregateDeploymentFailures(failures []deploymentFailure, numMatched int) e
 		quoted = append(quoted, fmt.Errorf("%s: %w", failure.name, failure.err))
 	}
 
+	scope := ""
 	if hidden > 0 {
-		return fmt.Errorf("Failed to reconcile %d of %d deployments using this secret (%d more not shown): %w",
-			len(failures), numMatched, hidden, errors.Join(quoted...))
+		scope = fmt.Sprintf(" (%d more not shown)", hidden)
 	}
-	return fmt.Errorf("Failed to reconcile %d of %d deployments using this secret: %w",
-		len(failures), numMatched, errors.Join(quoted...))
+
+	// A refused write is the shape a tightened ClusterRole takes. An install that dropped
+	// update on apps/deployments, or bound the role with a namespaced RoleBinding that does
+	// not cover the deployment's namespace, is refused every write while everything else keeps
+	// working. The API server's reply names the verb but not the remedy; add it once, not per
+	// failure.
+	remedy := ""
+	if slices.ContainsFunc(failures, func(f deploymentFailure) bool { return apierrors.IsForbidden(f.err) }) {
+		remedy = ". The operator writes this annotation directly, so its ClusterRole needs " +
+			"update on apps/deployments, bound in every namespace it reloads into"
+	}
+
+	return fmt.Errorf("Failed to reconcile %d of %d deployments using this secret%s: %w%s",
+		len(failures), numMatched, scope, errors.Join(quoted...), remedy)
 }
 
 // Evaluates whether or not the deployment is using the specified DopplerSecret.
