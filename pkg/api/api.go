@@ -96,6 +96,9 @@ func PerformRequest(context APIContext, req *http.Request) (*APIResponse, *APIEr
 		TLSClientConfig:   tlsConfig,
 	}
 
+	// #nosec G704 -- the host is taken from the DopplerSecret's host field, which has to
+	// accept arbitrary customer-defined values so the operator can talk to on-prem Doppler
+	// installations rather than only api.doppler.com.
 	r, err := client.Do(req)
 	if err != nil {
 		return nil, &APIError{Err: err, Message: "Unable to load response"}
