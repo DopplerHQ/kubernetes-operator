@@ -18,7 +18,10 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 
 	v1 "k8s.io/api/apps/v1"
@@ -32,6 +35,12 @@ import (
 const (
 	deploymentSecretUpdateAnnotationPrefix = "secrets.doppler.com/secretsupdate"
 	deploymentRestartAnnotation            = "secrets.doppler.com/reload"
+
+	// maxReportedDeploymentErrors bounds how many per-deployment failures are quoted in the
+	// aggregated error, which becomes a DopplerSecret status condition message stored in etcd.
+	// These failures are usually identical - a missing RBAC verb fails every deployment the
+	// same way - so a handful conveys the cause while the count conveys the scale.
+	maxReportedDeploymentErrors = 3
 )
 
 // Reconciles deployments marked with the restart annotation and that use the specified DopplerSecret.
@@ -50,21 +59,26 @@ func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Co
 		Namespace: namespace,
 		Name:      dopplerSecret.Spec.ManagedSecretRef.Name,
 	}
-	kubeSecret := &corev1.Secret{}
-	err = r.Client.Get(ctx, kubeSecretNamespacedName, kubeSecret)
+	kubeSecret, err := r.GetManagedSecret(ctx, kubeSecretNamespacedName)
 	if err != nil {
 		return 0, fmt.Errorf("Unable to fetch Kubernetes secret to update deployment: %w", err)
 	}
 	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var failures []deploymentFailure
+	numMatched := 0
 	for _, deployment := range deploymentList.Items {
 		if deployment.Annotations[deploymentRestartAnnotation] == "true" && r.IsDeploymentUsingSecret(deployment, dopplerSecret) {
+			numMatched++
 			wg.Add(1)
 			go func(deployment v1.Deployment, kubeSecret corev1.Secret, wg *sync.WaitGroup) {
 				defer wg.Done()
 				err := r.ReconcileDeployment(ctx, deployment, kubeSecret)
 				if err != nil {
-					// Errors reconciling deployments are logged but not propagated up. Failed deployments will be reconciled on the next run.
 					log.Error(err, "Unable to reconcile deployment")
+					mu.Lock()
+					defer mu.Unlock()
+					failures = append(failures, deploymentFailure{name: deployment.Name, err: err})
 				}
 			}(deployment, *kubeSecret, &wg)
 		}
@@ -73,7 +87,53 @@ func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Co
 
 	log.Info("Finished reconciling deployments", "numDeployments", len(deploymentList.Items))
 
-	return len(deploymentList.Items), nil
+	// Per-deployment failures are aggregated into the returned error rather than only logged.
+	// DeploymentReloadReady is derived from it, so dropping them would leave that condition
+	// reporting success while annotated deployments never restart - which is how a ClusterRole
+	// without the deployments patch verb presents. Returning the error also requeues.
+	return len(deploymentList.Items), aggregateDeploymentFailures(failures, numMatched)
+}
+
+// deploymentFailure records which deployment a reconcile error came from, so the aggregate
+// can name it and order deterministically.
+type deploymentFailure struct {
+	name string
+	err  error
+}
+
+// aggregateDeploymentFailures folds per-deployment errors into one error for the
+// DeploymentReloadReady condition.
+//
+// Sorted by deployment name so the message is stable from one reconcile to the next rather
+// than reordering with goroutine completion, and capped at maxReportedDeploymentErrors so a
+// namespace full of failing deployments cannot produce an unbounded status message.
+func aggregateDeploymentFailures(failures []deploymentFailure, numMatched int) error {
+	if len(failures) == 0 {
+		return nil
+	}
+
+	slices.SortFunc(failures, func(a, b deploymentFailure) int {
+		return strings.Compare(a.name, b.name)
+	})
+
+	reported := failures
+	hidden := 0
+	if len(reported) > maxReportedDeploymentErrors {
+		hidden = len(reported) - maxReportedDeploymentErrors
+		reported = reported[:maxReportedDeploymentErrors]
+	}
+
+	quoted := make([]error, 0, len(reported))
+	for _, failure := range reported {
+		quoted = append(quoted, fmt.Errorf("%s: %w", failure.name, failure.err))
+	}
+
+	if hidden > 0 {
+		return fmt.Errorf("Failed to reconcile %d of %d deployments using this secret (%d more not shown): %w",
+			len(failures), numMatched, hidden, errors.Join(quoted...))
+	}
+	return fmt.Errorf("Failed to reconcile %d of %d deployments using this secret: %w",
+		len(failures), numMatched, errors.Join(quoted...))
 }
 
 // Evaluates whether or not the deployment is using the specified DopplerSecret.

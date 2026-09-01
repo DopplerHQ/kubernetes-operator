@@ -11,7 +11,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	secretsv1alpha1 "github.com/DopplerHQ/kubernetes-operator/api/v1alpha1"
 	"github.com/DopplerHQ/kubernetes-operator/pkg/api"
@@ -36,33 +35,20 @@ type AuthProvider interface {
 	GetAPIContext(ctx context.Context) (*api.APIContext, error)
 }
 
-// Handle service token authentication
+// Handle service token authentication.
+//
+// The token secret is supplied by getAuthProvider, which has already fetched it to decide
+// which auth method applies, rather than being read a second time here.
 type ServiceTokenAuthProvider struct {
-	client    client.Client
-	tokenRef  secretsv1alpha1.TokenSecretReference
-	namespace string
-	host      string
-	verifyTLS bool
+	tokenSecret *corev1.Secret
+	host        string
+	verifyTLS   bool
 }
 
 func (s *ServiceTokenAuthProvider) GetAPIContext(ctx context.Context) (*api.APIContext, error) {
-	tokenSecret := corev1.Secret{}
-	tokenNamespace := s.namespace
-	if s.tokenRef.Namespace != "" {
-		tokenNamespace = s.tokenRef.Namespace
-	}
-
-	err := s.client.Get(ctx, types.NamespacedName{
-		Name:      s.tokenRef.Name,
-		Namespace: tokenNamespace,
-	}, &tokenSecret)
-	if err != nil {
-		return nil, fmt.Errorf("Unable to fetch token secret: %w", err)
-	}
-
-	serviceToken, ok := tokenSecret.Data["serviceToken"]
+	serviceToken, ok := s.tokenSecret.Data[kubeSecretServiceTokenKey]
 	if !ok {
-		return nil, fmt.Errorf("Token secret does not contain 'serviceToken' field")
+		return nil, fmt.Errorf("Token secret does not contain '%s' field", kubeSecretServiceTokenKey)
 	}
 
 	return &api.APIContext{
@@ -101,22 +87,21 @@ func (r *DopplerSecretReconciler) getAuthProvider(ctx context.Context, dopplerSe
 	}
 
 	// Check what the token secret contains to determine auth type
-	tokenSecret := corev1.Secret{}
 	tokenNamespace := dopplerSecret.Namespace
 	if dopplerSecret.Spec.TokenSecretRef.Namespace != "" {
 		tokenNamespace = dopplerSecret.Spec.TokenSecretRef.Namespace
 	}
 
-	err := r.Client.Get(ctx, types.NamespacedName{
+	tokenSecret, err := r.GetTokenSecret(ctx, types.NamespacedName{
 		Name:      dopplerSecret.Spec.TokenSecretRef.Name,
 		Namespace: tokenNamespace,
-	}, &tokenSecret)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("Unable to fetch token secret: %w", err)
 	}
 
 	// Check what authentication fields exist
-	_, hasServiceToken := tokenSecret.Data["serviceToken"]
+	_, hasServiceToken := tokenSecret.Data[kubeSecretServiceTokenKey]
 	tokenSecretIdentity, hasTokenSecretIdentity := tokenSecret.Data["identity"]
 
 	// Ensure mutual exclusivity between auth methods
@@ -126,17 +111,15 @@ func (r *DopplerSecretReconciler) getAuthProvider(ctx context.Context, dopplerSe
 
 	// Use OIDC authentication
 	if hasTokenSecretIdentity {
-		return r.createOIDCAuthProvider(dopplerSecret, string(tokenSecretIdentity), &tokenSecret)
+		return r.createOIDCAuthProvider(dopplerSecret, string(tokenSecretIdentity), tokenSecret)
 	}
 
 	// Use service token authentication
 	if hasServiceToken {
 		return &ServiceTokenAuthProvider{
-			client:    r.Client,
-			tokenRef:  dopplerSecret.Spec.TokenSecretRef,
-			namespace: dopplerSecret.Namespace,
-			host:      dopplerSecret.Spec.Host,
-			verifyTLS: dopplerSecret.Spec.VerifyTLS,
+			tokenSecret: tokenSecret,
+			host:        dopplerSecret.Spec.Host,
+			verifyTLS:   dopplerSecret.Spec.VerifyTLS,
 		}, nil
 	}
 
