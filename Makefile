@@ -129,7 +129,9 @@ charts: manifests kustomize helm-tool yq dist
 	$(YQ) e 'select(.kind != "CustomResourceDefinition")' dist/recommended.yaml > $(CHART_DIR)/templates/all.yaml
 	cp hack/helm/Chart.yaml $(CHART_DIR)/
 	cp hack/helm/NOTES.txt $(CHART_DIR)/templates/
-	touch $(CHART_DIR)/values.yaml
+	cp hack/helm/values.yaml $(CHART_DIR)/
+	# Replace hardcoded manager container resources with Helm-configurable values
+	perl -i -0777 -pe 's/(          resources:\n)            limits:\n              cpu: 100m\n              memory: 256Mi\n            requests:\n              cpu: 100m\n              memory: 256Mi/$$1            {{- toYaml .Values.resources | nindent 12 }}/g' $(CHART_DIR)/templates/all.yaml
 	helm package $(CHART_DIR) --version $(VERSION)
 
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
