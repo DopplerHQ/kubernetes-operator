@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 
 	secretsv1alpha1 "github.com/DopplerHQ/kubernetes-operator/api/v1alpha1"
 )
@@ -141,8 +142,9 @@ func (r *DopplerSecretReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *DopplerSecretReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *DopplerSecretReconciler) SetupWithManager(mgr ctrl.Manager, maxConcurrentReconciles int) error {
 	return ctrl.NewControllerManagedBy(mgr).
+		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).
 		For(&secretsv1alpha1.DopplerSecret{}).
 		Complete(r)
 }
