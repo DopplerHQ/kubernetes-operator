@@ -386,6 +386,24 @@ For example, you might have Base64-encoded TLS data that you want to copy to a n
 
 You can use [custom types and processors](docs/custom_types_and_processors.md) to achieve this.
 
+## Reconciling Many DopplerSecrets
+
+The operator resyncs each `DopplerSecret` every `resyncSeconds` (60 by default), and each resync makes one request to the Doppler API. By default it reconciles one `DopplerSecret` at a time.
+
+If you have hundreds of `DopplerSecret` resources and resyncs fall behind, start the operator with `--max-concurrent-reconciles` to reconcile several at once:
+
+```yaml
+args:
+  - --leader-elect
+  - --max-concurrent-reconciles=4
+```
+
+More concurrent reconciles send requests to the Doppler API faster, so keep your Doppler API rate limits in mind. Raising `resyncSeconds` on `DopplerSecret` resources that rarely change reduces the load instead.
+
+If two `DopplerSecret` resources reload the same deployment, concurrent reconciles can conflict when writing to it. The conflict appears in the operator logs, not in `status.conditions`, and the operator retries the write on the next sync.
+
+Concurrent reconciles can also log `Unable to set update secret condition` with an `object has been modified` error for a `DopplerSecret` that changed moments earlier, for example one you just created. The secret itself is still synced, and the next reconcile writes the condition again.
+
 ## Failure Strategy and Troubleshooting
 
 ### Inspecting Status
