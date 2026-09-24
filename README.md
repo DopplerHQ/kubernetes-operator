@@ -400,6 +400,8 @@ args:
 
 More concurrent reconciles send requests to the Doppler API faster, which counts against your Doppler API rate limits. Raising `resyncSeconds` on `DopplerSecret` resources that rarely change reduces the load instead.
 
+Each reconcile also writes to the Kubernetes API. The operator limits its requests for each kind of Kubernetes resource, such as `DopplerSecret`, `Secret` or `Deployment`, to 20 per second, with bursts of up to 30. If you raise `--max-concurrent-reconciles`, raise `--kube-api-qps` and `--kube-api-burst` with it, or the extra reconciles wait on that limit. Both flags must be greater than 0.
+
 If two `DopplerSecret` resources reload the same deployment, concurrent reconciles can conflict when writing to it. The conflict appears in the operator logs, not in `status.conditions`, and the operator retries the write on the next sync.
 
 Concurrent reconciles can also log `Unable to set update secret condition` with an `object has been modified` error for a `DopplerSecret` that changed moments earlier, for example one you just created. The secret is still synced, and the next reconcile writes the condition again.
