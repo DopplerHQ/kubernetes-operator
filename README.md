@@ -386,6 +386,64 @@ For example, you might have Base64-encoded TLS data that you want to copy to a n
 
 You can use [custom types and processors](docs/custom_types_and_processors.md) to achieve this.
 
+## Reconciling Many DopplerSecrets
+
+The operator resyncs each `DopplerSecret` every `resyncSeconds` (60 by default), and each resync makes one request to the Doppler API. By default it reconciles one `DopplerSecret` at a time.
+
+If you have hundreds of `DopplerSecret` resources and resyncs fall behind, start the operator with `--max-concurrent-reconciles` to reconcile several at once. See [Setting Operator Flags](#setting-operator-flags) for how.
+
+More concurrent reconciles send requests to the Doppler API faster, so keep your Doppler API rate limits in mind. Raising `resyncSeconds` on `DopplerSecret` resources that rarely change reduces the load instead.
+
+Each reconcile also writes to the Kubernetes API. The operator limits its requests for each kind of Kubernetes resource, such as `DopplerSecret`, `Secret` or `Deployment`, to 20 per second, with bursts of up to 30. If you raise `--max-concurrent-reconciles`, raise `--kube-api-qps` and `--kube-api-burst` with it, or the extra reconciles wait on that limit. Set both flags above 0: a value of 0 doesn't remove the limit, it falls back to the Kubernetes client's default of 5 requests per second with bursts of 10.
+
+If two `DopplerSecret` resources reload the same deployment, concurrent reconciles can conflict when writing to it. The conflict appears in the operator logs, not in `status.conditions`, and the operator retries the write on the next sync.
+
+Concurrent reconciles can also log `Unable to set update secret condition` with an `object has been modified` error for a `DopplerSecret` that changed moments earlier, for example one you just created. The secret itself is still synced, and the next reconcile writes the condition again.
+
+### Setting Operator Flags
+
+`--max-concurrent-reconciles`, `--kube-api-qps` and `--kube-api-burst` need operator version 1.8.0 or later. Older versions don't recognize them, and the new `manager` container fails to start with `flag provided but not defined`.
+
+Flags go in the `args` of the `manager` container in the `doppler-operator-controller-manager` Deployment. Neither the Helm chart nor `recommended.yaml` has a setting for them yet, so you add them to that list with a patch.
+
+#### With `recommended.yaml`
+
+Deploy `recommended.yaml` through a kustomization that patches the `manager` container. For example, save this as `kustomization.yaml` in a directory of its own:
+
+```yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - https://github.com/DopplerHQ/kubernetes-operator/releases/latest/download/recommended.yaml
+patches:
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: doppler-operator-controller-manager
+        namespace: doppler-operator-system
+      spec:
+        template:
+          spec:
+            containers:
+              - name: manager
+                args:
+                  - --health-probe-bind-address=:8081
+                  - --metrics-bind-address=127.0.0.1:8080
+                  - --leader-elect
+                  - --max-concurrent-reconciles=4
+                  - --kube-api-qps=50
+                  - --kube-api-burst=100
+```
+
+The `args` list replaces the container's existing arguments, so keep the first three. Then deploy, and later update, with `kubectl apply -k <directory>` instead of `kubectl apply -f`.
+
+#### With Helm
+
+The Helm chart has no setting for operator flags yet. To keep flags across `helm install`, `helm upgrade` and `helm rollback`, apply the same patch to the chart's output with a [post-renderer](https://helm.sh/docs/topics/advanced/#post-rendering).
+
+To try a flag quickly, you can edit the Deployment directly with `kubectl patch` or `kubectl edit`. Your next `helm upgrade` or `helm rollback` either reverts the change or fails with a field conflict on the `manager` container's `args`.
+
 ## Failure Strategy and Troubleshooting
 
 ### Inspecting Status

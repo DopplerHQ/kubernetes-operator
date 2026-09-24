@@ -55,12 +55,19 @@ func main() {
 	var enableLeaderElection bool
 	var probeAddr string
 	var oidcProviderCacheSize int
+	var maxConcurrentReconciles int
+	var kubeAPIQPS float64
+	var kubeAPIBurst int
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.IntVar(&oidcProviderCacheSize, "oidc-provider-cache-size", 2<<13, "Size of the OIDC provider cache. Set to 0 to disable caching.")
+	flag.IntVar(&maxConcurrentReconciles, "max-concurrent-reconciles", 1,
+		"How many DopplerSecrets to reconcile at once. Each reconcile makes a Doppler API request.")
+	flag.Float64Var(&kubeAPIQPS, "kube-api-qps", 20, "Maximum queries per second the operator sends to the Kubernetes API.")
+	flag.IntVar(&kubeAPIBurst, "kube-api-burst", 30, "Maximum burst of queries the operator sends to the Kubernetes API.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -70,9 +77,18 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	log := ctrl.Log.WithName("controllers").WithName("DopplerSecret")
 
+	if maxConcurrentReconciles < 1 {
+		setupLog.Error(nil, "--max-concurrent-reconciles must be at least 1", "value", maxConcurrentReconciles)
+		os.Exit(1)
+	}
+
 	controllers.InitializeOIDCCache(log, oidcProviderCacheSize)
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	restConfig := ctrl.GetConfigOrDie()
+	restConfig.QPS = float32(kubeAPIQPS)
+	restConfig.Burst = kubeAPIBurst
+
+	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
 			BindAddress: metricsAddr,
@@ -90,7 +106,7 @@ func main() {
 		Client: mgr.GetClient(),
 		Log:    log,
 		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	}).SetupWithManager(mgr, maxConcurrentReconciles); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "DopplerSecret")
 		os.Exit(1)
 	}
