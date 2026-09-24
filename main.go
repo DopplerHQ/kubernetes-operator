@@ -56,6 +56,8 @@ func main() {
 	var probeAddr string
 	var oidcProviderCacheSize int
 	var maxConcurrentReconciles int
+	var kubeAPIQPS float64
+	var kubeAPIBurst int
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -64,6 +66,8 @@ func main() {
 	flag.IntVar(&oidcProviderCacheSize, "oidc-provider-cache-size", 2<<13, "Size of the OIDC provider cache. Set to 0 to disable caching.")
 	flag.IntVar(&maxConcurrentReconciles, "max-concurrent-reconciles", 1,
 		"How many DopplerSecrets to reconcile at once. Each reconcile makes a Doppler API request.")
+	flag.Float64Var(&kubeAPIQPS, "kube-api-qps", 20, "Maximum queries per second the operator sends to the Kubernetes API.")
+	flag.IntVar(&kubeAPIBurst, "kube-api-burst", 30, "Maximum burst of queries the operator sends to the Kubernetes API.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -80,7 +84,11 @@ func main() {
 
 	controllers.InitializeOIDCCache(log, oidcProviderCacheSize)
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	restConfig := ctrl.GetConfigOrDie()
+	restConfig.QPS = float32(kubeAPIQPS)
+	restConfig.Burst = kubeAPIBurst
+
+	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
 			BindAddress: metricsAddr,
