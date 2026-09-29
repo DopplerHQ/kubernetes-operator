@@ -126,7 +126,10 @@ charts: manifests kustomize helm-tool yq dist
 	mkdir -p $(CHART_DIR)/crds
 	mkdir -p $(CHART_DIR)/templates
 	$(YQ) e 'select(.kind == "CustomResourceDefinition")' dist/recommended.yaml > $(CHART_DIR)/crds/all.yaml
-	$(YQ) e 'select(.kind != "CustomResourceDefinition")' dist/recommended.yaml > $(CHART_DIR)/templates/all.yaml
+	# Inject 'helm.sh/resource-policy: keep' into doppler-operator-system namespace to prevent it from being destroyed if chart is uninstalled.
+	# This will also allow future versions of the chart to remove this resource entirely.
+	$(YQ) e 'select(.kind == "Namespace") | .metadata.annotations."helm.sh/resource-policy" = "keep"' dist/recommended.yaml > $(CHART_DIR)/templates/namespace.yaml
+	$(YQ) e 'select(.kind != "CustomResourceDefinition" and .kind != "Namespace")' dist/recommended.yaml > $(CHART_DIR)/templates/all.yaml
 	cp hack/helm/Chart.yaml $(CHART_DIR)/
 	cp hack/helm/NOTES.txt $(CHART_DIR)/templates/
 	touch $(CHART_DIR)/values.yaml
