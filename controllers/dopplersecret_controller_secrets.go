@@ -45,6 +45,12 @@ const (
 	kubeSecretManagedByAnnotation         = "secrets.doppler.com/managed-by"
 	kubeSecretLastUpdatedAnnotation       = "secrets.doppler.com/last-updated"
 	kubeSecretServiceTokenKey             = "serviceToken"
+
+	// Stamped on every managed secret since v0.0.6. The filtered Secret cache selects on it.
+	SubtypeLabelKey         = "secrets.doppler.com/subtype"
+	ManagedSecretLabelValue = "dopplerSecret"
+	// Opts a user-created token secret into the filtered cache. The operator never applies it.
+	TokenSecretLabelValue = "dopplerToken"
 )
 
 var kubeSecretBuiltInAnnotationKeys = []string{kubeSecretVersionAnnotation, kubeSecretProcessorsVersionAnnotation, kubeSecretFormatVersionAnnotation, kubeSecretDashboardLinkAnnotaion, kubeSecretManagedByAnnotation, kubeSecretLastUpdatedAnnotation}
@@ -66,7 +72,7 @@ func GetDashboardLink(secrets []models.Secret) string {
 	return fmt.Sprintf("https://dashboard.doppler.com/workplace/projects/%v/configs/%v", projectSlug, configSlug)
 }
 
-// GetReferencedSecret gets a Kubernetes secret from a SecretReference
+// GetReferencedSecret gets a Kubernetes secret from a SecretReference, bypassing the filtered cache
 func (r *DopplerSecretReconciler) GetReferencedSecret(ctx context.Context, namespacedName types.NamespacedName) (*corev1.Secret, error) {
 	existingKubeSecret := &corev1.Secret{}
 	err := r.Client.Get(ctx, namespacedName, existingKubeSecret)
@@ -74,6 +80,60 @@ func (r *DopplerSecretReconciler) GetReferencedSecret(ctx context.Context, names
 		existingKubeSecret = nil
 	}
 	return existingKubeSecret, err
+}
+
+// getCachedSecret reads a secret through the filtered cache when one is configured.
+//
+// The cache cannot see a secret without our label, such as one a user created and pointed
+// a DopplerSecret at for adoption. A miss or any other cache error is confirmed against
+// the API server, or the operator would try to Create a secret that already exists. The
+// returned bool is true when the cache missed a secret the API server has.
+func (r *DopplerSecretReconciler) getCachedSecret(ctx context.Context, namespacedName types.NamespacedName) (*corev1.Secret, bool, error) {
+	if r.CachedSecretReader == nil || r.APIReader == nil {
+		kubeSecret, err := r.GetReferencedSecret(ctx, namespacedName)
+		return kubeSecret, false, err
+	}
+
+	kubeSecret := &corev1.Secret{}
+	err := r.CachedSecretReader.Get(ctx, namespacedName, kubeSecret)
+	if err == nil {
+		return kubeSecret, false, nil
+	}
+	notFound := errors.IsNotFound(err)
+	if !notFound {
+		r.Log.Error(err, "Secret cache read failed, falling back to the API server",
+			"secret", namespacedName.String())
+	}
+	if err := r.APIReader.Get(ctx, namespacedName, kubeSecret); err != nil {
+		return nil, false, err
+	}
+	return kubeSecret, notFound, nil
+}
+
+// GetManagedSecret gets a secret this operator manages, preferring the filtered cache.
+func (r *DopplerSecretReconciler) GetManagedSecret(ctx context.Context, namespacedName types.NamespacedName) (*corev1.Secret, error) {
+	kubeSecret, _, err := r.getCachedSecret(ctx, namespacedName)
+	return kubeSecret, err
+}
+
+// GetTokenSecret gets a token secret a DopplerSecret references. Token secrets belong to
+// the user, so one is cached only if the user has labelled it, and is never written to.
+func (r *DopplerSecretReconciler) GetTokenSecret(ctx context.Context, namespacedName types.NamespacedName) (*corev1.Secret, error) {
+	kubeSecret, missedCache, err := r.getCachedSecret(ctx, namespacedName)
+	if missedCache {
+		r.logUncachedTokenSecret(namespacedName)
+	}
+	return kubeSecret, err
+}
+
+// logUncachedTokenSecret suggests the opt-in label, once per secret per process.
+func (r *DopplerSecretReconciler) logUncachedTokenSecret(namespacedName types.NamespacedName) {
+	if _, seen := r.uncachedTokenSecrets.LoadOrStore(namespacedName.String(), struct{}{}); seen {
+		return
+	}
+	r.Log.Info("Token secret is read from the API server on every reconcile. Label it to have the operator cache it instead.",
+		"secret", namespacedName.String(),
+		"label", SubtypeLabelKey+"="+TokenSecretLabelValue)
 }
 
 // GetDopplerToken gets the Doppler Service Token referenced by the DopplerSecret
@@ -160,7 +220,7 @@ func GetKubeSecretLabels(additionalLabels map[string]string) map[string]string {
 		labels[k] = v
 	}
 
-	labels["secrets.doppler.com/subtype"] = "dopplerSecret"
+	labels[SubtypeLabelKey] = ManagedSecretLabelValue
 
 	return labels
 }
@@ -260,7 +320,7 @@ func (r *DopplerSecretReconciler) UpdateSecret(ctx context.Context, dopplerSecre
 		Name:      dopplerSecret.Spec.ManagedSecretRef.Name,
 		Namespace: dopplerSecret.Spec.ManagedSecretRef.Namespace,
 	}
-	existingKubeSecret, err := r.GetReferencedSecret(ctx, managedSecretNamespacedName)
+	existingKubeSecret, err := r.GetManagedSecret(ctx, managedSecretNamespacedName)
 	if err != nil && !errors.IsNotFound(err) {
 		return fmt.Errorf("Failed to fetch managed secret reference: %w", err)
 	}

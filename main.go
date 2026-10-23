@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 
@@ -24,10 +25,15 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/selection"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -50,6 +56,30 @@ func init() {
 	//+kubebuilder:scaffold:scheme
 }
 
+// secretCacheRunnable exposes GetCache so the manager treats the cache like its own
+// and waits for it to sync before starting controllers.
+type secretCacheRunnable struct {
+	cache.Cache
+}
+
+func (c secretCacheRunnable) GetCache() cache.Cache { return c.Cache }
+
+// cachedSecretSelector matches managed secrets and opted-in token secrets.
+var cachedSecretSelector = mustCachedSecretSelector()
+
+func mustCachedSecretSelector() labels.Selector {
+	requirement, err := labels.NewRequirement(
+		controllers.SubtypeLabelKey,
+		selection.In,
+		[]string{controllers.ManagedSecretLabelValue, controllers.TokenSecretLabelValue},
+	)
+	if err != nil {
+		// Only reachable if the label constants stop being valid label values.
+		panic(err)
+	}
+	return labels.NewSelector().Add(*requirement)
+}
+
 func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
@@ -58,6 +88,7 @@ func main() {
 	var maxConcurrentReconciles int
 	var kubeAPIQPS float64
 	var kubeAPIBurst int
+	var enableSecretCache bool
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -68,6 +99,9 @@ func main() {
 		"How many DopplerSecrets to reconcile at once. Each reconcile makes a Doppler API request.")
 	flag.Float64Var(&kubeAPIQPS, "kube-api-qps", 20, "Maximum queries per second the operator sends to the Kubernetes API.")
 	flag.IntVar(&kubeAPIBurst, "kube-api-burst", 30, "Maximum burst of queries the operator sends to the Kubernetes API.")
+	flag.BoolVar(&enableSecretCache, "enable-secret-cache", true,
+		"Cache only managed Secrets and token secrets labelled secrets.doppler.com/subtype=dopplerToken. "+
+			"Set to false to read every Secret from the API server.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -98,6 +132,13 @@ func main() {
 
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme: scheme,
+		// A cached Secret read would start an informer holding every Secret in the
+		// cluster. Secrets come from the filtered cache below instead.
+		Client: client.Options{
+			Cache: &client.CacheOptions{
+				DisableFor: []client.Object{&corev1.Secret{}},
+			},
+		},
 		Metrics: metricsserver.Options{
 			BindAddress: metricsAddr,
 		},
@@ -110,10 +151,43 @@ func main() {
 		os.Exit(1)
 	}
 
+	var cachedSecretReader client.Reader
+	if enableSecretCache {
+		setupLog.Info("Caching only the secrets this operator uses", "selector", cachedSecretSelector.String())
+		secretCache, err := cache.New(restConfig, cache.Options{
+			Scheme: scheme,
+			ByObject: map[client.Object]cache.ByObject{
+				&corev1.Secret{}: {
+					Label:     cachedSecretSelector,
+					Transform: cache.TransformStripManagedFields(),
+				},
+			},
+			// Stops this cache from starting an unfiltered informer for any other type.
+			ReaderFailOnMissingInformer: true,
+		})
+		if err != nil {
+			setupLog.Error(err, "unable to build secret cache")
+			os.Exit(1)
+		}
+		if _, err := secretCache.GetInformer(context.Background(), &corev1.Secret{}); err != nil {
+			setupLog.Error(err, "unable to start secret cache informer")
+			os.Exit(1)
+		}
+		if err := mgr.Add(secretCacheRunnable{secretCache}); err != nil {
+			setupLog.Error(err, "unable to add secret cache to manager")
+			os.Exit(1)
+		}
+		cachedSecretReader = secretCache
+	} else {
+		setupLog.Info("Secret caching disabled; all Secret reads go to the API server")
+	}
+
 	if err = (&controllers.DopplerSecretReconciler{
-		Client: mgr.GetClient(),
-		Log:    log,
-		Scheme: mgr.GetScheme(),
+		Client:             mgr.GetClient(),
+		Log:                log,
+		Scheme:             mgr.GetScheme(),
+		CachedSecretReader: cachedSecretReader,
+		APIReader:          mgr.GetAPIReader(),
 	}).SetupWithManager(mgr, maxConcurrentReconciles); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "DopplerSecret")
 		os.Exit(1)
