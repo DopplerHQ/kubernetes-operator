@@ -42,11 +42,20 @@ type DopplerSecretReconciler struct {
 	// token secrets. Nil when Secret caching is disabled.
 	CachedSecretReader client.Reader
 
-	// APIReader bypasses all caches. Used to confirm a cache miss.
+	// APIReader bypasses all caches. Used to confirm a cache miss, and to list deployments
+	// while the Deployment cache has not synced.
 	APIReader client.Reader
+
+	// DeploymentInformers reports whether the cluster-wide Deployment cache has synced. Nil
+	// skips the check and always reads the cache.
+	DeploymentInformers DeploymentInformers
 
 	// uncachedTokenSecrets records the token secrets the opt-in hint has been logged for.
 	uncachedTokenSecrets sync.Map
+
+	// deploymentCacheState records how long the Deployment cache has gone unsynced, so a
+	// cache that never syncs is logged once.
+	deploymentCacheState deploymentCacheState
 }
 
 const (
