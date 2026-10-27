@@ -183,11 +183,12 @@ func main() {
 	}
 
 	if err = (&controllers.DopplerSecretReconciler{
-		Client:             mgr.GetClient(),
-		Log:                log,
-		Scheme:             mgr.GetScheme(),
-		CachedSecretReader: cachedSecretReader,
-		APIReader:          mgr.GetAPIReader(),
+		Client:              mgr.GetClient(),
+		Log:                 log,
+		Scheme:              mgr.GetScheme(),
+		CachedSecretReader:  cachedSecretReader,
+		APIReader:           mgr.GetAPIReader(),
+		DeploymentInformers: mgr.GetCache(),
 	}).SetupWithManager(mgr, maxConcurrentReconciles); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "DopplerSecret")
 		os.Exit(1)
