@@ -220,8 +220,22 @@ func aggregateDeploymentFailures(failures []deploymentFailure, numMatched int) e
 	}
 
 	return fmt.Errorf("Failed to reconcile %d of %d deployments using this secret%s%s: %w",
-		len(failures), numMatched, omitted, remedy, errors.Join(quoted...))
+		len(failures), numMatched, omitted, remedy, joinedErrors(quoted))
 }
+
+// joinedErrors is errors.Join on one line, so the status message reads as one line in
+// kubectl describe. Unwrap keeps errors.Is and errors.As working on each error.
+type joinedErrors []error
+
+func (e joinedErrors) Error() string {
+	messages := make([]string, len(e))
+	for i, err := range e {
+		messages[i] = err.Error()
+	}
+	return strings.Join(messages, "; ")
+}
+
+func (e joinedErrors) Unwrap() []error { return e }
 
 // Evaluates whether or not the deployment is using the specified DopplerSecret.
 // Specifically, a deployment is using a DopplerSecret if it references it using `envFrom`, `secretKeyRef` or `volumes`.

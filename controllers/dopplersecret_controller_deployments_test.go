@@ -337,6 +337,26 @@ func TestAggregateDeploymentFailuresOmitsRemedyForOtherErrors(t *testing.T) {
 	}
 }
 
+// The failures are quoted on one line, and each one stays detectable through the wrapper.
+func TestAggregateDeploymentFailuresStaysOnOneLine(t *testing.T) {
+	failures := []deploymentFailure{
+		{name: "web", err: forbiddenUpdate("web")},
+		{name: "api", err: forbiddenUpdate("api")},
+	}
+
+	err := aggregateDeploymentFailures(failures, 2)
+
+	if strings.Contains(err.Error(), "\n") {
+		t.Errorf("status message should be one line, got: %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "; web: ") {
+		t.Errorf("failures should be separated by \"; \", got: %v", err)
+	}
+	if !apierrors.IsForbidden(err) {
+		t.Errorf("the forbidden errors should stay detectable through the wrapper: %v", err)
+	}
+}
+
 // syncedInformer stands in for the Deployment informer, answering only HasSynced.
 type syncedInformer struct {
 	crcache.Informer
