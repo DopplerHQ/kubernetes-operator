@@ -29,6 +29,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	crcache "sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	secretsv1alpha1 "github.com/DopplerHQ/kubernetes-operator/api/v1alpha1"
@@ -42,10 +43,19 @@ const (
 	maxReportedDeploymentErrors = 3
 )
 
-// deploymentListTimeout bounds the cached Deployment List. A synced cache answers from
-// memory, so this only matters when the informer cannot sync. A variable so tests can
-// shorten it.
+// deploymentListTimeout bounds the Deployment List. A synced cache answers from memory, so
+// this only matters if the cache is read before it syncs. A variable so tests can shorten it.
 var deploymentListTimeout = 30 * time.Second
+
+// deploymentCacheSyncGrace is how long the Deployment cache can stay unsynced before it is
+// logged. A variable so tests can shorten it.
+var deploymentCacheSyncGrace = 30 * time.Second
+
+// DeploymentInformers is the part of the manager's cache used to check whether the
+// Deployment informer has synced. cache.Cache satisfies it.
+type DeploymentInformers interface {
+	GetInformer(ctx context.Context, obj client.Object, opts ...crcache.InformerGetOption) (crcache.Informer, error)
+}
 
 // Reconciles deployments marked with the restart annotation and that use the specified DopplerSecret.
 func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Context, dopplerSecret secretsv1alpha1.DopplerSecret) (int, error) {
@@ -54,19 +64,8 @@ func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Co
 	if dopplerSecret.Spec.ManagedSecretRef.Namespace != "" {
 		namespace = dopplerSecret.Spec.ManagedSecretRef.Namespace
 	}
-	// The List waits for the cluster-wide Deployment informer to sync, and a reconcile
-	// context has no deadline. Without a bound, an informer that never syncs holds the
-	// reconcile worker forever.
-	listCtx, cancelList := context.WithTimeout(ctx, deploymentListTimeout)
-	defer cancelList()
-	deploymentList := &v1.DeploymentList{}
-	err := r.Client.List(listCtx, deploymentList, &client.ListOptions{Namespace: namespace})
+	deploymentList, err := r.listDeployments(ctx, namespace)
 	if err != nil {
-		if apierrors.IsTimeout(err) || errors.Is(err, context.DeadlineExceeded) {
-			err = fmt.Errorf("%w (the Deployment cache did not sync within %s: the operator needs list and watch "+
-				"on apps/deployments at cluster scope, which a namespaced RoleBinding does not grant)",
-				err, deploymentListTimeout)
-		}
 		return 0, fmt.Errorf("Unable to fetch deployments: %w", err)
 	}
 	kubeSecretNamespacedName := types.NamespacedName{
@@ -103,6 +102,90 @@ func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Co
 
 	// Returned so DeploymentReloadReady does not report success while deployments go unreloaded.
 	return len(deploymentList.Items), aggregateDeploymentFailures(failures, numMatched)
+}
+
+// listDeployments lists the deployments in a namespace, from the cluster-wide Deployment
+// cache once it has synced and from the API server until then.
+//
+// Waiting for the cache instead would hold the reconcile worker for the whole deadline on
+// every reconcile, and the controller's priority queue keeps handing that worker to the
+// DopplerSecrets already failing, so the ones queued at startup might never sync. Listing
+// directly fails fast when the operator cannot list deployments at all, and works when it
+// can list only some namespaces through a RoleBinding, whose cache can never sync.
+func (r *DopplerSecretReconciler) listDeployments(ctx context.Context, namespace string) (*v1.DeploymentList, error) {
+	listCtx, cancelList := context.WithTimeout(ctx, deploymentListTimeout)
+	defer cancelList()
+	deploymentList := &v1.DeploymentList{}
+	listOptions := &client.ListOptions{Namespace: namespace}
+
+	if r.APIReader != nil {
+		synced := r.deploymentCacheSynced(ctx)
+		r.noteDeploymentCacheSynced(synced)
+		if !synced {
+			err := r.APIReader.List(listCtx, deploymentList, listOptions)
+			if apierrors.IsForbidden(err) {
+				err = fmt.Errorf("%w (the Deployment cache has not synced, so the operator listed this namespace "+
+					"directly: it needs list and watch on apps/deployments, at cluster scope for the cache to sync)", err)
+			}
+			return deploymentList, err
+		}
+	}
+
+	err := r.Client.List(listCtx, deploymentList, listOptions)
+	if apierrors.IsTimeout(err) || errors.Is(err, context.DeadlineExceeded) {
+		err = fmt.Errorf("%w (the Deployment cache did not sync within %s: the operator needs list and watch "+
+			"on apps/deployments at cluster scope, which a namespaced RoleBinding does not grant)",
+			err, deploymentListTimeout)
+	}
+	return deploymentList, err
+}
+
+// deploymentCacheSynced reports whether the Deployment informer has synced, starting it if it
+// has not started, without waiting for it.
+func (r *DopplerSecretReconciler) deploymentCacheSynced(ctx context.Context) bool {
+	if r.DeploymentInformers == nil {
+		return true
+	}
+	informer, err := r.DeploymentInformers.GetInformer(ctx, &v1.Deployment{}, crcache.BlockUntilSynced(false))
+	if err != nil {
+		r.Log.Error(err, "Unable to get the Deployment informer; listing deployments from the API server")
+		return false
+	}
+	return informer.HasSynced()
+}
+
+// noteDeploymentCacheSynced logs when the Deployment cache has stayed unsynced for
+// deploymentCacheSyncGrace, and when it syncs after that. The informer starts on the first
+// reconcile, so a cache still syncing then is normal and not logged.
+func (r *DopplerSecretReconciler) noteDeploymentCacheSynced(synced bool) {
+	state := &r.deploymentCacheState
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	if synced {
+		if state.reported {
+			r.Log.Info("Deployment cache has synced; listing deployments from the cache")
+		}
+		state.unsyncedSince = time.Time{}
+		state.reported = false
+		return
+	}
+	if state.unsyncedSince.IsZero() {
+		state.unsyncedSince = time.Now()
+	}
+	if !state.reported && time.Since(state.unsyncedSince) >= deploymentCacheSyncGrace {
+		r.Log.Info("Deployment cache has not synced; listing deployments from the API server until it does. "+
+			"The cache needs list and watch on apps/deployments at cluster scope.",
+			"unsyncedFor", time.Since(state.unsyncedSince).Round(time.Second).String())
+		state.reported = true
+	}
+}
+
+// deploymentCacheState tracks how long the Deployment cache has gone unsynced.
+type deploymentCacheState struct {
+	mu            sync.Mutex
+	unsyncedSince time.Time
+	reported      bool
 }
 
 // deploymentFailure pairs a reconcile error with the deployment it came from.

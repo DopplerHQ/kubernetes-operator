@@ -9,12 +9,14 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	crcache "sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -332,5 +334,182 @@ func TestAggregateDeploymentFailuresOmitsRemedyForOtherErrors(t *testing.T) {
 
 	if strings.Contains(got, "update on apps/deployments") {
 		t.Errorf("a conflict is not an RBAC problem, got: %v", got)
+	}
+}
+
+// syncedInformer stands in for the Deployment informer, answering only HasSynced.
+type syncedInformer struct {
+	crcache.Informer
+	synced bool
+}
+
+func (i syncedInformer) HasSynced() bool { return i.synced }
+
+// deploymentInformers stands in for the manager's cache.
+type deploymentInformers struct {
+	synced *bool
+	err    error
+}
+
+func (d deploymentInformers) GetInformer(_ context.Context, _ client.Object, _ ...crcache.InformerGetOption) (crcache.Informer, error) {
+	if d.err != nil {
+		return nil, d.err
+	}
+	return syncedInformer{synced: *d.synced}, nil
+}
+
+// fallbackReconciler builds a reconciler whose cached client and API reader share one
+// store holding a reload deployment and its secret. cachedList and apiList, when non-nil,
+// intercept the List on each side.
+func fallbackReconciler(t *testing.T, informers DeploymentInformers, cachedList, apiList func(context.Context) error, log logr.Logger) (*DopplerSecretReconciler, client.Client) {
+	t.Helper()
+	deployment := reloadDeployment("web")
+	store := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{
+			Name:        "creds",
+			Namespace:   "app",
+			Annotations: map[string]string{kubeSecretVersionAnnotation: "v2"},
+			Labels:      map[string]string{SubtypeLabelKey: ManagedSecretLabelValue},
+		}},
+		&deployment,
+	).Build()
+
+	intercept := func(listFn func(context.Context) error) client.WithWatch {
+		if listFn == nil {
+			return store
+		}
+		return interceptor.NewClient(store, interceptor.Funcs{
+			List: func(ctx context.Context, _ client.WithWatch, _ client.ObjectList, _ ...client.ListOption) error {
+				return listFn(ctx)
+			},
+		})
+	}
+
+	return &DopplerSecretReconciler{
+		Client:              intercept(cachedList),
+		APIReader:           intercept(apiList),
+		DeploymentInformers: informers,
+		Log:                 log,
+	}, store
+}
+
+func reloadedVersion(t *testing.T, store client.Client) string {
+	t.Helper()
+	deployment := &v1.Deployment{}
+	if err := store.Get(context.Background(), client.ObjectKey{Namespace: "app", Name: "web"}, deployment); err != nil {
+		t.Fatalf("re-reading the deployment: %v", err)
+	}
+	return deployment.Spec.Template.Annotations[deploymentSecretUpdateAnnotationPrefix+".creds"]
+}
+
+func failList(t *testing.T, side string) func(context.Context) error {
+	return func(context.Context) error {
+		t.Errorf("deployments were listed from the %s", side)
+		return errors.New("unexpected List")
+	}
+}
+
+// Once the Deployment cache has synced, deployments come from it and not the API server.
+func TestReconcileDeploymentsReadsTheCacheOnceSynced(t *testing.T) {
+	synced := true
+	r, store := fallbackReconciler(t, deploymentInformers{synced: &synced}, nil, failList(t, "API server"), logr.Discard())
+
+	if _, err := r.ReconcileDeploymentsUsingSecret(context.Background(), reloadDopplerSecret()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := reloadedVersion(t, store); got != "v2" {
+		t.Errorf("deployment was not reloaded, annotation is %q", got)
+	}
+}
+
+// Until the Deployment cache syncs, deployments are listed from the API server, so a
+// namespaced RoleBinding is enough for reloads to work.
+func TestReconcileDeploymentsListsDirectlyUntilTheCacheSyncs(t *testing.T) {
+	for name, informers := range map[string]deploymentInformers{
+		"cache not synced":     {synced: new(bool)},
+		"informer unavailable": {err: errors.New("no informer")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r, store := fallbackReconciler(t, informers, failList(t, "unsynced cache"), nil, logr.Discard())
+
+			if _, err := r.ReconcileDeploymentsUsingSecret(context.Background(), reloadDopplerSecret()); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := reloadedVersion(t, store); got != "v2" {
+				t.Errorf("deployment was not reloaded, annotation is %q", got)
+			}
+		})
+	}
+}
+
+// With no permission to list deployments, the reload fails at once rather than holding the
+// reconcile worker for the whole list deadline.
+func TestReconcileDeploymentsFailsFastWhenListingIsRefused(t *testing.T) {
+	refused := func(context.Context) error {
+		return apierrors.NewForbidden(schema.GroupResource{Group: "apps", Resource: "deployments"}, "",
+			errors.New(`cannot list resource "deployments" in API group "apps" in the namespace "app"`))
+	}
+	waitForever := func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	r, _ := fallbackReconciler(t, deploymentInformers{synced: new(bool)}, waitForever, refused, logr.Discard())
+
+	start := time.Now()
+	_, err := r.ReconcileDeploymentsUsingSecret(context.Background(), reloadDopplerSecret())
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("a refused List should fail at once, took %v", elapsed)
+	}
+	if !apierrors.IsForbidden(err) {
+		t.Fatalf("expected the forbidden List to be returned, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "list and watch on apps/deployments, at cluster scope") {
+		t.Errorf("expected the RBAC hint, got: %v", err)
+	}
+}
+
+// A cache that stays unsynced past the grace period is logged once, and so is its recovery.
+// One that syncs within it, as at every startup, is not logged.
+func TestUnsyncedDeploymentCacheIsLoggedOnlyAfterTheGracePeriod(t *testing.T) {
+	for name, tc := range map[string]struct {
+		grace                    time.Duration
+		wantUnsynced, wantSynced int
+	}{
+		"syncs at startup": {grace: time.Hour},
+		"stays unsynced":   {grace: 0, wantUnsynced: 1, wantSynced: 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			original := deploymentCacheSyncGrace
+			deploymentCacheSyncGrace = tc.grace
+			defer func() { deploymentCacheSyncGrace = original }()
+
+			var logged []string
+			log := funcr.New(func(_, args string) { logged = append(logged, args) }, funcr.Options{})
+			synced := false
+			r, _ := fallbackReconciler(t, deploymentInformers{synced: &synced}, nil, nil, log)
+			count := func(substr string) int {
+				n := 0
+				for _, line := range logged {
+					if strings.Contains(line, substr) {
+						n++
+					}
+				}
+				return n
+			}
+
+			for _, cacheSynced := range []bool{false, false, false, true, true} {
+				synced = cacheSynced
+				if _, err := r.ReconcileDeploymentsUsingSecret(context.Background(), reloadDopplerSecret()); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+
+			if n := count("has not synced; listing deployments from the API server"); n != tc.wantUnsynced {
+				t.Errorf("expected %d log lines for an unsynced cache, got %d: %v", tc.wantUnsynced, n, logged)
+			}
+			if n := count("has synced; listing deployments from the cache"); n != tc.wantSynced {
+				t.Errorf("expected %d log lines for the cache syncing, got %d: %v", tc.wantSynced, n, logged)
+			}
+		})
 	}
 }
