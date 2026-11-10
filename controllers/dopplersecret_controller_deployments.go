@@ -50,8 +50,7 @@ func (r *DopplerSecretReconciler) ReconcileDeploymentsUsingSecret(ctx context.Co
 		Namespace: namespace,
 		Name:      dopplerSecret.Spec.ManagedSecretRef.Name,
 	}
-	kubeSecret := &corev1.Secret{}
-	err = r.Client.Get(ctx, kubeSecretNamespacedName, kubeSecret)
+	kubeSecret, err := r.GetManagedSecret(ctx, kubeSecretNamespacedName)
 	if err != nil {
 		return 0, fmt.Errorf("Unable to fetch Kubernetes secret to update deployment: %w", err)
 	}
