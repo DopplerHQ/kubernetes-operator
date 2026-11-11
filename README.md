@@ -447,8 +447,6 @@ Each reconcile also writes to the Kubernetes API. The operator limits its reques
 
 If two `DopplerSecret` resources reload the same deployment, concurrent reconciles can conflict when writing to it. The conflict sets the `DeploymentReloadReady` condition to `False` until the next sync, when the operator retries the write.
 
-Concurrent reconciles can also log `Unable to set update secret condition` with an `object has been modified` error for a `DopplerSecret` that changed moments earlier, for example one you just created. The secret is still synced, and the next reconcile writes the condition again.
-
 ### Setting Operator Flags
 
 `--max-concurrent-reconciles`, `--kube-api-qps` and `--kube-api-burst` need operator version 1.8.0 or later. Older versions don't recognize them, and the `manager` container fails to start with `flag provided but not defined`.
