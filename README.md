@@ -61,7 +61,7 @@ You can verify that the operator is running successfully in your cluster with `.
 A `DopplerSecret` is a custom Kubernetes resource with references to two secrets:
 
 - A Kubernetes secret containing either your Doppler Service Token (in the `serviceToken` field) OR OIDC configuration (in the `identity` field) for authentication (AKA "Doppler Token Secret")
-- A Kubernetes secret where your synced Doppler secrets will be stored (AKA "Managed Secret"). This secret will be created by the operator if it does not already exist.
+- A Kubernetes secret where your synced Doppler secrets will be stored (AKA "Managed Secret"). This secret will be created by the operator if it does not already exist. If it does exist, the operator takes it over: on every sync it replaces the secret's data with your Doppler secrets, removing any keys you added yourself. Keep values that don't come from Doppler in a separate secret.
 
 > Note: While these resources can be created in any namespace, it is recommended that you create your Doppler Token Secret and DopplerSecret inside the `doppler-operator-system` namespace to prevent unauthorized access. The managed secret should be namespaced with the deployments which will use the secret.
 
