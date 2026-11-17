@@ -26,11 +26,8 @@ import (
 	secretsv1alpha1 "github.com/DopplerHQ/kubernetes-operator/api/v1alpha1"
 )
 
-func (r *DopplerSecretReconciler) SetSecretsSyncReadyCondition(ctx context.Context, dopplerSecret *secretsv1alpha1.DopplerSecret, updateSecretsError error) {
-	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName())
-	if dopplerSecret.Status.Conditions == nil {
-		dopplerSecret.Status.Conditions = []metav1.Condition{}
-	}
+// SetSecretsSyncReadyCondition records the result of syncing the managed secret. UpdateStatus writes it.
+func (r *DopplerSecretReconciler) SetSecretsSyncReadyCondition(dopplerSecret *secretsv1alpha1.DopplerSecret, updateSecretsError error) {
 	if updateSecretsError == nil {
 		meta.SetStatusCondition(&dopplerSecret.Status.Conditions, metav1.Condition{
 			Type:    "secrets.doppler.com/SecretSyncReady",
@@ -52,17 +49,10 @@ func (r *DopplerSecretReconciler) SetSecretsSyncReadyCondition(ctx context.Conte
 			Message: "Deployment reload has been stopped due to secrets sync failure",
 		})
 	}
-	err := r.Client.Status().Update(ctx, dopplerSecret)
-	if err != nil {
-		log.Error(err, "Unable to set update secret condition")
-	}
 }
 
-func (r *DopplerSecretReconciler) SetDeploymentReloadReadyCondition(ctx context.Context, dopplerSecret *secretsv1alpha1.DopplerSecret, numDeployments int, deploymentError error) {
-	log := r.Log.WithValues("dopplersecret", dopplerSecret.GetNamespacedName())
-	if dopplerSecret.Status.Conditions == nil {
-		dopplerSecret.Status.Conditions = []metav1.Condition{}
-	}
+// SetDeploymentReloadReadyCondition records the result of reloading deployments. UpdateStatus writes it.
+func (r *DopplerSecretReconciler) SetDeploymentReloadReadyCondition(dopplerSecret *secretsv1alpha1.DopplerSecret, numDeployments int, deploymentError error) {
 	if deploymentError == nil {
 		meta.SetStatusCondition(&dopplerSecret.Status.Conditions, metav1.Condition{
 			Type:    "secrets.doppler.com/DeploymentReloadReady",
@@ -78,8 +68,13 @@ func (r *DopplerSecretReconciler) SetDeploymentReloadReadyCondition(ctx context.
 			Message: fmt.Sprintf("Deployment reconcile failed: %v", deploymentError),
 		})
 	}
-	err := r.Client.Status().Update(ctx, dopplerSecret)
-	if err != nil {
-		log.Error(err, "Unable to set reconcile deployments condition")
+}
+
+// UpdateStatus writes the DopplerSecret's conditions. Reconcile calls it once, after setting
+// every condition. With two writes, the first one's watch event starts the next reconcile
+// before the cache has the second, and that reconcile's write conflicts.
+func (r *DopplerSecretReconciler) UpdateStatus(ctx context.Context, dopplerSecret *secretsv1alpha1.DopplerSecret) {
+	if err := r.Client.Status().Update(ctx, dopplerSecret); err != nil {
+		r.Log.Error(err, "Unable to update dopplersecret status", "dopplersecret", dopplerSecret.GetNamespacedName())
 	}
 }
