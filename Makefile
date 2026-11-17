@@ -127,9 +127,25 @@ charts: manifests kustomize helm-tool yq dist
 	mkdir -p $(CHART_DIR)/templates
 	$(YQ) e 'select(.kind == "CustomResourceDefinition")' dist/recommended.yaml > $(CHART_DIR)/crds/all.yaml
 	$(YQ) e 'select(.kind != "CustomResourceDefinition")' dist/recommended.yaml > $(CHART_DIR)/templates/all.yaml
+	# The manifest above is generated from config/, so the controller
+	# Deployment arrives with every value fixed. Two of them are things an
+	# operator needs to choose per cluster rather than accept: how many
+	# replicas to run, and how to spread them. Swap those for Helm
+	# expressions here so the generated chart stays generated.
+	#
+	# yq writes the placeholder quoted, which is why each one is replaced
+	# including its quotes -- `replicas: '{{ ... }}'` would render a string
+	# where the API expects an integer. sed writes to a new file rather than
+	# in place: `sed -i` takes an argument on BSD and not on GNU.
+	$(YQ) -i '(select(.kind == "Deployment") | .spec.replicas) = "@@REPLICA_COUNT@@"' $(CHART_DIR)/templates/all.yaml
+	$(YQ) -i '(select(.kind == "Deployment") | .spec.template.spec.topologySpreadConstraints) = "@@TOPOLOGY_SPREAD@@"' $(CHART_DIR)/templates/all.yaml
+	sed -e "s/'@@REPLICA_COUNT@@'/{{ .Values.replicaCount }}/" \
+	    -e "s/topologySpreadConstraints: '@@TOPOLOGY_SPREAD@@'/topologySpreadConstraints: {{- toYaml .Values.topologySpreadConstraints | nindent 8 }}/" \
+	    $(CHART_DIR)/templates/all.yaml > $(CHART_DIR)/templates/all.yaml.tmp
+	mv $(CHART_DIR)/templates/all.yaml.tmp $(CHART_DIR)/templates/all.yaml
 	cp hack/helm/Chart.yaml $(CHART_DIR)/
 	cp hack/helm/NOTES.txt $(CHART_DIR)/templates/
-	touch $(CHART_DIR)/values.yaml
+	cp hack/helm/values.yaml $(CHART_DIR)/
 	helm package $(CHART_DIR) --version $(VERSION)
 
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.

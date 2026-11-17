@@ -1,0 +1,31 @@
+# Replicas of the controller manager.
+#
+# The operator already runs with --leader-elect and ships the RBAC for leases,
+# so more than one is safe: the extras stand by and one takes over when the
+# leader goes away. Until now the chart could not express that -- the
+# generated manifest fixed it at 1 -- so a node rotation took secret syncing
+# down until the pod was rescheduled.
+replicaCount: 1
+
+# Pod topology spread constraints for the controller manager.
+#
+# Empty by default, which is the same manifest as before. Worth setting
+# whenever replicaCount is above 1: without it the replicas can all land on
+# one node, and losing that node costs exactly as much as running a single
+# replica did.
+#
+# A constraint here should carry matchLabelKeys: [pod-template-hash]. A spread
+# is evaluated only when a pod is admitted, and during a rolling update the old
+# revision's Terminating pods match the same selector -- so the scheduler can
+# accept a placement that violates maxSkew the moment they go, and nothing
+# rebalances afterwards.
+#
+#   topologySpreadConstraints:
+#     - maxSkew: 1
+#       topologyKey: topology.kubernetes.io/zone
+#       whenUnsatisfiable: DoNotSchedule
+#       matchLabelKeys: [pod-template-hash]
+#       labelSelector:
+#         matchLabels:
+#           control-plane: controller-manager
+topologySpreadConstraints: []
