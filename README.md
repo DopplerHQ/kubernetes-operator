@@ -491,6 +491,73 @@ The Helm chart has no setting for operator flags yet. To keep flags across `helm
 
 To try a flag quickly, you can edit the Deployment directly with `kubectl patch` or `kubectl edit`. Your next `helm upgrade` or `helm rollback` either reverts the change or fails with a field conflict on the `manager` container's `args`.
 
+## Using an HTTP Proxy
+
+If your cluster reaches the internet through an egress proxy, set the standard `HTTPS_PROXY` and `NO_PROXY` environment variables on the operator. The operator sends its requests to the Doppler API, including OIDC token exchanges, through the proxy in `HTTPS_PROXY`, or `HTTP_PROXY` for a `http://` host. Proxy support needs operator version 1.8.0 or later.
+
+The operator's requests to the Kubernetes API also follow these variables, so `NO_PROXY` must include the Kubernetes API server. Otherwise those requests go through the proxy, which usually can't reach the API server, and the operator fails to start. Include at least:
+
+- The address of the `kubernetes` service in the `default` namespace, or the whole service network
+- `.svc` and `.cluster.local`
+- Any on-premises Doppler host that the cluster reaches directly
+
+### Finding the Proxy Values on Kubernetes
+
+Get the proxy URL from whoever manages your network or nodes. Kubernetes doesn't record it anywhere the operator can read.
+
+For `NO_PROXY`, find the address of the `kubernetes` service, which is how the operator reaches the API server:
+
+```bash
+kubectl get service kubernetes -n default -o jsonpath='{.spec.clusterIP}{"\n"}'
+```
+
+That address is enough for the operator. To cover the whole service network instead, look up its CIDR. On Kubernetes 1.33 or later, run `kubectl get servicecidrs`. On older versions, check your distribution's or cloud provider's cluster settings. Clusters created with `kubeadm` use `10.96.0.0/12` by default.
+
+With the default `kubeadm` service network, for example:
+
+```bash
+HTTPS_PROXY=http://proxy.example.com:3128
+NO_PROXY=10.96.0.0/12,.svc,.cluster.local
+```
+
+### Finding the Proxy Values on OpenShift
+
+If your OpenShift cluster uses a cluster-wide proxy, its `noProxy` list already includes the service network, `.svc`, `.cluster.local` and the API server. Copy both values from it:
+
+```bash
+oc get proxy cluster -o jsonpath='{.status.httpsProxy}{"\n"}{.status.noProxy}{"\n"}'
+```
+
+If both values are empty, the cluster has no cluster-wide proxy. Follow [Finding the Proxy Values on Kubernetes](#finding-the-proxy-values-on-kubernetes) instead, with `oc` in place of `kubectl`. OpenShift's default service network is `172.30.0.0/16`.
+
+The operator isn't installed through Operator Lifecycle Manager (OLM), so OpenShift doesn't add the cluster-wide proxy settings to it automatically. You set them yourself, as the next section describes.
+
+### Setting the Proxy Variables
+
+Neither the Helm chart nor `recommended.yaml` has a setting for proxy variables yet. Set them on the `manager` container in the `doppler-operator-controller-manager` Deployment, replacing the values with the ones you found:
+
+```bash
+kubectl set env deployment/doppler-operator-controller-manager -n doppler-operator-system -c manager \
+  HTTPS_PROXY=http://proxy.example.com:3128 \
+  NO_PROXY=10.96.0.0/12,.svc,.cluster.local
+```
+
+On OpenShift, `oc set env` with the same arguments works too.
+
+A `helm upgrade` or a reapplied `recommended.yaml` can remove variables that you set this way. To keep them, add an `env` list to the `manager` container in the patch from [Setting Operator Flags](#setting-operator-flags):
+
+```yaml
+containers:
+  - name: manager
+    env:
+      - name: HTTPS_PROXY
+        value: http://proxy.example.com:3128
+      - name: NO_PROXY
+        value: 10.96.0.0/12,.svc,.cluster.local
+```
+
+Unlike `args`, the `env` list merges with the container's existing settings, so the patch doesn't need to repeat anything.
+
 ## Failure Strategy and Troubleshooting
 
 ### Inspecting Status

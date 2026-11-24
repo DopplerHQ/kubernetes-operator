@@ -126,6 +126,7 @@ func (o *OIDCAuthProvider) exchangeTokenWithDoppler(ctx context.Context, saToken
 	req.Header.Set("Accept", "application/json")
 
 	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
 		TLSClientConfig: &tls.Config{
 			// #nosec G402 -- verification is disabled only when a DopplerSecret sets
 			// verifyTLS: false. The field defaults to true, and exists for on-prem

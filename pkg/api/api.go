@@ -92,6 +92,7 @@ func PerformRequest(context APIContext, req *http.Request) (*APIResponse, *APIEr
 	}
 
 	client.Transport = &http.Transport{
+		Proxy:             http.ProxyFromEnvironment,
 		DisableKeepAlives: true,
 		TLSClientConfig:   tlsConfig,
 	}
